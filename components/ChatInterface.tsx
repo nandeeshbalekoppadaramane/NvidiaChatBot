@@ -7,7 +7,6 @@ interface ChatInterfaceProps {
   selectedModel: string;
   systemPrompt: string;
   temperature: number;
-  maxTokens: number;
   apiKey: string;
   selectedModelCategory?: string;
 }
@@ -17,7 +16,6 @@ export function ChatInterface({
   selectedModel,
   systemPrompt,
   temperature,
-  maxTokens,
   apiKey,
   selectedModelCategory = "chat"
 }: ChatInterfaceProps) {
@@ -35,7 +33,6 @@ export function ChatInterface({
     body: {
       model: selectedModel,
       temperature,
-      maxTokens,
     },
     initialMessages: systemPrompt ? [{ id: 'system', role: 'system', content: systemPrompt }] : [],
     onError: (error) => {

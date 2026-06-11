@@ -23,8 +23,6 @@ interface SidebarProps {
   setSelectedModel: (id: string) => void;
   temperature: number;
   setTemperature: (val: number) => void;
-  maxTokens: number;
-  setMaxTokens: (val: number) => void;
   systemPrompt: string;
   setSystemPrompt: (val: string) => void;
   chatHistory: ChatSession[];
@@ -43,8 +41,6 @@ export function Sidebar({
   setSelectedModel,
   temperature,
   setTemperature,
-  maxTokens,
-  setMaxTokens,
   systemPrompt,
   setSystemPrompt,
   chatHistory,
@@ -209,17 +205,6 @@ export function Sidebar({
                 <span>0.0</span>
                 <span>2.0</span>
               </div>
-            </div>
-
-            <div className="flex flex-col gap-2 mt-2">
-              <label className="text-xs font-medium text-gray-300">Max Tokens</label>
-              <input 
-                type="number" 
-                min="1" max="128000"
-                value={maxTokens}
-                onChange={(e) => setMaxTokens(parseInt(e.target.value) || 4096)}
-                className="w-full bg-[#111] border border-white/10 rounded-lg py-1.5 px-3 text-xs text-white outline-none focus:border-[#76B900]/50"
-              />
             </div>
           </div>
 

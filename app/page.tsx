@@ -13,7 +13,6 @@ export default function Home() {
   // Settings
   const [selectedModel, setSelectedModel] = useState("");
   const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(4096);
   const [systemPrompt, setSystemPrompt] = useState("");
   
   // Chat state
@@ -33,9 +32,6 @@ export default function Home() {
     const savedTemp = localStorage.getItem("nv_temperature");
     if (savedTemp) setTemperature(parseFloat(savedTemp));
 
-    const savedTokens = localStorage.getItem("nv_max_tokens");
-    if (savedTokens) setMaxTokens(parseInt(savedTokens));
-
     const savedHistory = localStorage.getItem("nv_history");
     if (savedHistory) {
       try {
@@ -52,10 +48,6 @@ export default function Home() {
   useEffect(() => {
     if (isMounted) localStorage.setItem("nv_temperature", temperature.toString());
   }, [temperature, isMounted]);
-
-  useEffect(() => {
-    if (isMounted) localStorage.setItem("nv_max_tokens", maxTokens.toString());
-  }, [maxTokens, isMounted]);
 
   useEffect(() => {
     if (isMounted && apiKey) localStorage.setItem("nv_api_key", apiKey);
@@ -140,8 +132,6 @@ export default function Home() {
         setSelectedModel={setSelectedModel}
         temperature={temperature}
         setTemperature={setTemperature}
-        maxTokens={maxTokens}
-        setMaxTokens={setMaxTokens}
         systemPrompt={systemPrompt}
         setSystemPrompt={setSystemPrompt}
         chatHistory={chatHistory}
@@ -158,7 +148,6 @@ export default function Home() {
         selectedModelCategory={selectedModelCategory}
         systemPrompt={systemPrompt}
         temperature={temperature}
-        maxTokens={maxTokens}
         apiKey={apiKey}
       />
     </div>

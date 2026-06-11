@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     }
     const apiKey = authHeader.split(" ")[1];
 
-    const { messages, model, temperature, maxTokens } = await req.json();
+    const { messages, model, temperature } = await req.json();
 
     // Create a custom OpenAI client pointing to NVIDIA's endpoint
     const openai = new OpenAI({
@@ -44,11 +44,6 @@ export async function POST(req: Request) {
       temperature: temperature ?? 0.7,
       stream: true,
     };
-
-    // Only include max_tokens if explicitly provided and not the default 4096
-    if (maxTokens && maxTokens !== 4096) {
-      payload.max_tokens = maxTokens;
-    }
 
     const response = await openai.chat.completions.create(payload);
 
