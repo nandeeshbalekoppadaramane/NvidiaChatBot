@@ -149,6 +149,31 @@ export function ChatInterface({
 
   const displayMessages = messages.filter(m => m.role !== 'system');
 
+  const renderMessageContent = (content: string) => {
+    // Check if the content has a <think> block
+    const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+    if (thinkMatch) {
+      const thinkContent = thinkMatch[1].trim();
+      const restContent = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+      
+      return (
+        <div className="flex flex-col gap-3 w-full">
+          {thinkContent && (
+            <div className="bg-black/20 border border-white/5 p-3 rounded-xl text-xs text-gray-400 italic custom-scrollbar overflow-x-auto">
+              <div className="font-semibold text-gray-500 mb-1.5 flex items-center gap-2 not-italic">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-pulse" />
+                Thinking Process...
+              </div>
+              <div className="whitespace-pre-wrap leading-relaxed">{thinkContent}</div>
+            </div>
+          )}
+          {restContent && <div className="text-sm leading-relaxed whitespace-pre-wrap">{restContent}</div>}
+        </div>
+      );
+    }
+    return <div className="text-sm leading-relaxed whitespace-pre-wrap">{content}</div>;
+  };
+
   return (
     <main className="flex-1 flex flex-col h-full bg-transparent relative z-10">
       <header className="h-[64px] flex items-center justify-between px-5 glass-panel border-b border-white/5 border-x-0 border-t-0 shrink-0">
@@ -196,10 +221,10 @@ export function ChatInterface({
                 {(msg.data as any)?.imageUrl && msg.role === 'user' ? (
                   <div className="flex flex-col gap-3">
                     <img src={(msg.data as any).imageUrl} alt="Upload" className="rounded-lg max-w-sm max-h-64 object-contain shadow-sm border border-gray-100" />
-                    <span className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</span>
+                    {renderMessageContent(msg.content)}
                   </div>
                 ) : (
-                  <div className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</div>
+                  renderMessageContent(msg.content)
                 )}
               </div>
             </div>
@@ -209,10 +234,11 @@ export function ChatInterface({
         {isLoading && displayMessages[displayMessages.length - 1]?.role === 'user' && (
           <div className="flex justify-start w-full">
             <div className="max-w-[85%] rounded-2xl p-4 bg-white/5 border border-white/10 text-gray-200 rounded-bl-sm glass-panel flex items-center gap-3">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              <div className="flex gap-1.5 items-center">
+                <span className="text-xs text-[#76B900] font-semibold mr-1">Generating</span>
+                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           </div>

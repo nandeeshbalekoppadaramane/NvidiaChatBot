@@ -28,33 +28,12 @@ export async function GET(req: Request) {
     const data = await response.json();
     
     const allowedKeywords = [
-      "llama-3.1-405b",
-      "llama-3.1-70b",
-      "llama-3.1-8b",
-      "llama-3.2-1b",
-      "llama-3.2-3b",
-      "llama-3.2-90b-vision",
-      "llama-3.2-11b-vision",
-      "mistral-large",
-      "mixtral-8x22b",
-      "mistral-nemo",
-      "gemma-2-27b",
-      "gemma-2-9b",
-      "gemma-2-2b",
-      "phi-3.5-mini",
-      "deepseek-coder",
-      "granite-34b",
-      "qwen2.5-72b",
-      "qwen2.5-coder-32b",
-      "qwen2.5-7b",
-      "qwen2.5-3b",
-      "qwen2.5-1.5b",
-      "qwen-vl",
-      "moonshot",
-      "kimi",
-      "minimax",
-      "nemotron-4-340b",
-      "nemotron-mini-4b"
+      "glm-5.1",
+      "minimax-m2.7",
+      "qwen3.5-397b",
+      "llama-3.2-90b",
+      "llama-3.2-11b",
+      "kimi-k2.6"
     ];
 
     // Filter and format models
@@ -62,9 +41,8 @@ export async function GET(req: Request) {
       .filter((m: any) => {
         const id = m.id.toLowerCase();
         
-        // Exclude completely broken models first
-        if (id.includes("embed") || 
-            id.includes("rerank") || 
+        // Exclude completely broken models or unsupported types
+        if (id.includes("rerank") || 
             id.includes("retriever") ||
             id.includes("tts") ||
             id.includes("asr") ||
