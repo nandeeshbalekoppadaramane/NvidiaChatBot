@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+@theme {
+  --color-nv-green: #76B900;
+  --color-nv-green-light: #8dd417;
+  --color-nv-green-dark: #5a8f00;
+  --color-nv-teal: #00b4d8;
+
+  --color-bg-deepest: #050505;
+  --color-bg-deep: #0a0a0a;
+  --color-bg-dark: #111111;
+  --color-bg-card: #1a1a1a;
+  --color-bg-elevated: #222222;
+  --color-bg-hover: #2a2a2a;
+
+  --color-glass-bg: rgba(25, 25, 25, 0.6);
+  --color-glass-border: rgba(255, 255, 255, 0.06);
+  --color-glass-bg-hover: rgba(35, 35, 35, 0.7);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-white/10;
+  }
+  body {
+    @apply bg-bg-deepest text-white antialiased overflow-hidden h-screen w-screen selection:bg-nv-green/30;
+  }
+  
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/20;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-glass-bg backdrop-blur-xl border border-glass-border shadow-2xl;
+  }
+  .glass-panel {
+    @apply bg-glass-bg backdrop-blur-xl border border-glass-border;
+  }
+}
+
+/* Background Grid Animation */
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.grid-lines {
+  position: absolute;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  background-image:
+    linear-gradient(rgba(118, 185, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(118, 185, 0, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  animation: gridMove 25s linear infinite;
+}
+.grid-glow {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  width: 800px;
+  height: 800px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(118, 185, 0, 0.06) 0%, transparent 60%);
+  animation: glowPulse 8s ease-in-out infinite alternate;
+}
+@keyframes gridMove {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(60px, 60px); }
+}
+@keyframes glowPulse {
+  0% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+}
