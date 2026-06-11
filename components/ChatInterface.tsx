@@ -196,9 +196,9 @@ export function ChatInterface({
                     <span className="text-xs font-semibold text-[#76B900]">NVIDIA</span>
                   </div>
                 )}
-                {msg.data?.imageUrl && msg.role === 'user' ? (
+                {(msg.data as any)?.imageUrl && msg.role === 'user' ? (
                   <div className="flex flex-col gap-3">
-                    <img src={msg.data.imageUrl} alt="Upload" className="rounded-lg max-w-[200px] h-auto object-cover" />
+                    <img src={(msg.data as any).imageUrl} alt="Upload" className="rounded-lg max-w-sm max-h-64 object-contain shadow-sm border border-gray-100" />
                     <span className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</span>
                   </div>
                 ) : (
