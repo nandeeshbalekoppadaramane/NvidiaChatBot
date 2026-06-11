@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Square, Menu, Paperclip, X, Mic } from "lucide-react";
+import { Send, Square, Menu, Paperclip, X, Mic, Check, Copy, Globe } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { useChat } from "ai/react";
 
 interface ChatInterfaceProps {
@@ -9,7 +13,51 @@ interface ChatInterfaceProps {
   temperature: number;
   apiKey: string;
   selectedModelCategory?: string;
+  webSearchEnabled?: boolean;
 }
+
+const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || '');
+  const lang = match ? match[1] : '';
+  
+  const handleCopy = () => {
+    navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (!inline && match) {
+    return (
+      <div className="rounded-lg overflow-hidden my-4 border border-white/10 bg-[#1e1e1e] shadow-lg">
+        <div className="flex items-center justify-between px-4 py-2 bg-black/40 border-b border-white/5">
+          <span className="text-xs font-mono text-gray-400 uppercase">{lang}</span>
+          <button 
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+          >
+            {copied ? <Check size={14} className="text-[#76B900]" /> : <Copy size={14} />}
+            {copied ? "Copied!" : "Copy Code"}
+          </button>
+        </div>
+        <SyntaxHighlighter
+          style={vscDarkPlus as any}
+          language={lang}
+          PreTag="div"
+          customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '0.85rem' }}
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      </div>
+    );
+  }
+  return (
+    <code className="bg-black/30 rounded px-1.5 py-0.5 font-mono text-sm text-[#76B900]" {...props}>
+      {children}
+    </code>
+  );
+};
 
 export function ChatInterface({
   onOpenSidebar,
@@ -17,7 +65,8 @@ export function ChatInterface({
   systemPrompt,
   temperature,
   apiKey,
-  selectedModelCategory = "chat"
+  selectedModelCategory = "chat",
+  webSearchEnabled = false
 }: ChatInterfaceProps) {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -33,6 +82,7 @@ export function ChatInterface({
     body: {
       model: selectedModel,
       temperature,
+      webSearchEnabled,
     },
     initialMessages: systemPrompt ? [{ id: 'system', role: 'system', content: systemPrompt }] : [],
     onError: (error) => {
@@ -167,11 +217,57 @@ export function ChatInterface({
               <div className="whitespace-pre-wrap leading-relaxed">{thinkContent}</div>
             </div>
           )}
-          {restContent && <div className="text-sm leading-relaxed whitespace-pre-wrap">{restContent}</div>}
+          {restContent && (
+            <div className="text-sm leading-relaxed overflow-x-hidden">
+               <ReactMarkdown 
+                 remarkPlugins={[remarkGfm]}
+                 components={{
+                   code: CodeBlock as any,
+                   p: ({node, ...props}) => <p className="mb-4 last:mb-0 leading-relaxed" {...props} />,
+                   ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-1.5" {...props} />,
+                   ol: ({node, ...props}) => <ol className="list-decimal pl-6 mb-4 space-y-1.5" {...props} />,
+                   li: ({node, ...props}) => <li className="leading-relaxed" {...props} />,
+                   h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-4 mt-6 text-[#76B900]" {...props} />,
+                   h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-3 mt-5 text-white" {...props} />,
+                   h3: ({node, ...props}) => <h3 className="text-lg font-semibold mb-2 mt-4 text-gray-200" {...props} />,
+                   table: ({node, ...props}) => <div className="overflow-x-auto mb-4 custom-scrollbar"><table className="w-full border-collapse text-left text-sm" {...props} /></div>,
+                   th: ({node, ...props}) => <th className="border-b border-white/20 bg-white/5 p-3 font-semibold text-gray-200" {...props} />,
+                   td: ({node, ...props}) => <td className="border-b border-white/5 p-3 text-gray-300 align-top" {...props} />,
+                   blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-[#76B900] pl-4 italic text-gray-400 my-4 bg-[#76B900]/5 py-2 pr-2 rounded-r" {...props} />,
+                   a: ({node, ...props}) => <a className="text-[#76B900] hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props} />
+                 }}
+               >
+                 {restContent}
+               </ReactMarkdown>
+            </div>
+          )}
         </div>
       );
     }
-    return <div className="text-sm leading-relaxed whitespace-pre-wrap">{content}</div>;
+    return (
+      <div className="text-sm leading-relaxed overflow-x-hidden">
+         <ReactMarkdown 
+           remarkPlugins={[remarkGfm]}
+           components={{
+             code: CodeBlock as any,
+             p: ({node, ...props}) => <p className="mb-4 last:mb-0 leading-relaxed" {...props} />,
+             ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-1.5" {...props} />,
+             ol: ({node, ...props}) => <ol className="list-decimal pl-6 mb-4 space-y-1.5" {...props} />,
+             li: ({node, ...props}) => <li className="leading-relaxed" {...props} />,
+             h1: ({node, ...props}) => <h1 className="text-2xl font-bold mb-4 mt-6 text-[#76B900]" {...props} />,
+             h2: ({node, ...props}) => <h2 className="text-xl font-bold mb-3 mt-5 text-white" {...props} />,
+             h3: ({node, ...props}) => <h3 className="text-lg font-semibold mb-2 mt-4 text-gray-200" {...props} />,
+             table: ({node, ...props}) => <div className="overflow-x-auto mb-4 custom-scrollbar"><table className="w-full border-collapse text-left text-sm" {...props} /></div>,
+             th: ({node, ...props}) => <th className="border-b border-white/20 bg-white/5 p-3 font-semibold text-gray-200" {...props} />,
+             td: ({node, ...props}) => <td className="border-b border-white/5 p-3 text-gray-300 align-top" {...props} />,
+             blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-[#76B900] pl-4 italic text-gray-400 my-4 bg-[#76B900]/5 py-2 pr-2 rounded-r" {...props} />,
+             a: ({node, ...props}) => <a className="text-[#76B900] hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props} />
+           }}
+         >
+           {content}
+         </ReactMarkdown>
+      </div>
+    );
   };
 
   return (
@@ -289,13 +385,18 @@ export function ChatInterface({
               value={input || ""}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+              placeholder={webSearchEnabled ? "Ask anything (Web Search enabled)..." : "Type a message... (Enter to send, Shift+Enter for newline)"}
               className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-[200px] min-h-[44px] py-3"
               rows={1}
               disabled={!selectedModel}
               style={{ height: 'auto' }}
             />
             <div className="flex items-center gap-2 pr-1 pb-1">
+              {webSearchEnabled && (
+                <div className="hidden sm:flex items-center justify-center p-1.5 mr-1 text-[#76B900] bg-[#76B900]/10 rounded-full" title="Web Search Enabled">
+                  <Globe size={16} />
+                </div>
+              )}
               {isLoading ? (
                 <button
                   type="button"

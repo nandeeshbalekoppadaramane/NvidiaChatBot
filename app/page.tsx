@@ -14,6 +14,7 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   
   // Chat state
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -32,6 +33,9 @@ export default function Home() {
     const savedTemp = localStorage.getItem("nv_temperature");
     if (savedTemp) setTemperature(parseFloat(savedTemp));
 
+    const savedWebSearch = localStorage.getItem("nv_web_search");
+    if (savedWebSearch) setWebSearchEnabled(savedWebSearch === "true");
+
     const savedHistory = localStorage.getItem("nv_history");
     if (savedHistory) {
       try {
@@ -48,6 +52,10 @@ export default function Home() {
   useEffect(() => {
     if (isMounted) localStorage.setItem("nv_temperature", temperature.toString());
   }, [temperature, isMounted]);
+
+  useEffect(() => {
+    if (isMounted) localStorage.setItem("nv_web_search", webSearchEnabled.toString());
+  }, [webSearchEnabled, isMounted]);
 
   useEffect(() => {
     if (isMounted && apiKey) localStorage.setItem("nv_api_key", apiKey);
@@ -136,6 +144,8 @@ export default function Home() {
         setSystemPrompt={setSystemPrompt}
         chatHistory={chatHistory}
         currentChatId={currentChatId}
+        webSearchEnabled={webSearchEnabled}
+        setWebSearchEnabled={setWebSearchEnabled}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
@@ -149,6 +159,7 @@ export default function Home() {
         systemPrompt={systemPrompt}
         temperature={temperature}
         apiKey={apiKey}
+        webSearchEnabled={webSearchEnabled}
       />
     </div>
   );

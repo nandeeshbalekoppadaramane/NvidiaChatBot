@@ -27,6 +27,8 @@ interface SidebarProps {
   setSystemPrompt: (val: string) => void;
   chatHistory: ChatSession[];
   currentChatId: string | null;
+  webSearchEnabled: boolean;
+  setWebSearchEnabled: (val: boolean) => void;
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
   onDeleteChat: (id: string) => void;
@@ -45,6 +47,8 @@ export function Sidebar({
   setSystemPrompt,
   chatHistory,
   currentChatId,
+  webSearchEnabled,
+  setWebSearchEnabled,
   onSelectChat,
   onNewChat,
   onDeleteChat,
@@ -204,6 +208,16 @@ export function Sidebar({
               <div className="flex justify-between text-[10px] text-gray-600">
                 <span>0.0</span>
                 <span>2.0</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-2 p-2 rounded-lg bg-white/5 border border-white/10 cursor-pointer" onClick={() => setWebSearchEnabled(!webSearchEnabled)}>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-gray-200">Web Search</span>
+                <span className="text-[10px] text-gray-500">Augment AI with live data</span>
+              </div>
+              <div className={`w-8 h-4 rounded-full flex items-center p-0.5 transition-colors ${webSearchEnabled ? 'bg-[#76B900]' : 'bg-gray-700'}`}>
+                <div className={`w-3 h-3 rounded-full bg-white transition-transform ${webSearchEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
               </div>
             </div>
           </div>
