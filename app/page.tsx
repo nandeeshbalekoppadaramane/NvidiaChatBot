@@ -119,6 +119,17 @@ export default function Home() {
   }
 
   // The chat UI
+  const selectedModelObj = models.find(m => m.id === selectedModel);
+  let selectedModelCategory = selectedModelObj?.category;
+  if (!selectedModelCategory) {
+    const smLower = selectedModel.toLowerCase();
+    if (smLower.includes("vision") || smLower.includes("pixtral") || smLower.includes("llava")) {
+      selectedModelCategory = "vision";
+    } else {
+      selectedModelCategory = "chat";
+    }
+  }
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <Sidebar 
@@ -144,6 +155,7 @@ export default function Home() {
         key={currentChatId || 'default'}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         selectedModel={selectedModel}
+        selectedModelCategory={selectedModelCategory}
         systemPrompt={systemPrompt}
         temperature={temperature}
         maxTokens={maxTokens}

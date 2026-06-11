@@ -19,14 +19,38 @@ export async function POST(req: Request) {
       apiKey,
     });
 
-    // Start stream using native OpenAI library
-    const response = await openai.chat.completions.create({
-      model: model || "meta/llama-3.1-70b-instruct",
-      messages,
-      temperature: temperature ?? 0.7,
-      max_tokens: maxTokens ?? 4096,
-      stream: true,
+    // Parse messages to handle vision images
+    const formattedMessages = messages.map((msg: any) => {
+      // Check if there's an attached image (sent via data object from frontend)
+      if (msg.role === 'user' && msg.data && msg.data.imageUrl) {
+        return {
+          role: msg.role,
+          content: [
+            { type: "text", text: msg.content },
+            { type: "image_url", image_url: { url: msg.data.imageUrl } }
+          ]
+        };
+      }
+      
+      // Clean up internal properties that OpenAI API doesn't accept
+      const { data, id, ...cleanMsg } = msg;
+      return cleanMsg;
     });
+
+    // Start stream using native OpenAI library
+    const payload: any = {
+      model: model || "meta/llama-3.1-70b-instruct",
+      messages: formattedMessages,
+      temperature: temperature ?? 0.7,
+      stream: true,
+    };
+
+    // Only include max_tokens if explicitly provided and not the default 4096
+    if (maxTokens && maxTokens !== 4096) {
+      payload.max_tokens = maxTokens;
+    }
+
+    const response = await openai.chat.completions.create(payload);
 
     // Convert response to AI stream
     const stream = OpenAIStream(response as any);

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Square, Menu, Paperclip } from "lucide-react";
+import { Send, Square, Menu, Paperclip, X, Mic } from "lucide-react";
 import { useChat } from "ai/react";
 
 interface ChatInterfaceProps {
@@ -9,6 +9,7 @@ interface ChatInterfaceProps {
   temperature: number;
   maxTokens: number;
   apiKey: string;
+  selectedModelCategory?: string;
 }
 
 export function ChatInterface({
@@ -17,9 +18,16 @@ export function ChatInterface({
   systemPrompt,
   temperature,
   maxTokens,
-  apiKey
+  apiKey,
+  selectedModelCategory = "chat"
 }: ChatInterfaceProps) {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages } = useChat({
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const startInputRef = useRef("");
+
+  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append } = useChat({
     api: "/api/chat",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -54,9 +62,82 @@ export function ChatInterface({
     }
   }, [messages]);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAttachedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Please try Chrome or Edge.");
+      return;
+    }
+
+    if (!recognitionRef.current) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      
+      recognition.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = 0; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+        }
+        handleInputChange({ target: { value: startInputRef.current + (startInputRef.current ? " " : "") + transcript } } as any);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error", event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+      
+      recognitionRef.current = recognition;
+    }
+
+    startInputRef.current = input || "";
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!selectedModel) return;
+    if (!selectedModel || !(input || "").trim()) return;
+
+    if (selectedModelCategory === "vision" && attachedImage) {
+      // Send with data attached
+      append({
+        id: Date.now().toString(),
+        role: "user",
+        content: input,
+        data: { imageUrl: attachedImage }
+      });
+      handleInputChange({ target: { value: "" } } as any);
+      setAttachedImage(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     handleSubmit(e);
   };
 
@@ -115,7 +196,14 @@ export function ChatInterface({
                     <span className="text-xs font-semibold text-[#76B900]">NVIDIA</span>
                   </div>
                 )}
-                <div className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</div>
+                {msg.data?.imageUrl && msg.role === 'user' ? (
+                  <div className="flex flex-col gap-3">
+                    <img src={msg.data.imageUrl} alt="Upload" className="rounded-lg max-w-[200px] h-auto object-cover" />
+                    <span className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</span>
+                  </div>
+                ) : (
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</div>
+                )}
               </div>
             </div>
           ))
@@ -136,10 +224,43 @@ export function ChatInterface({
       </div>
 
       <div className="p-4 md:p-6 shrink-0">
-        <div className="max-w-4xl mx-auto glass-panel rounded-2xl border border-white/10 p-2 shadow-2xl focus-within:border-[#76B900]/50 focus-within:shadow-[0_0_30px_rgba(118,185,0,0.15)] transition-all">
+        <div className="max-w-4xl mx-auto glass-panel rounded-2xl border border-white/10 p-2 shadow-2xl focus-within:border-[#76B900]/50 focus-within:shadow-[0_0_30px_rgba(118,185,0,0.15)] transition-all flex flex-col">
+          {attachedImage && (
+            <div className="relative w-16 h-16 ml-2 mt-2 mb-2 group">
+              <img src={attachedImage} alt="Attachment preview" className="w-full h-full object-cover rounded-lg border border-white/20" />
+              <button 
+                type="button"
+                onClick={() => { setAttachedImage(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
           <form onSubmit={onSubmit} className="flex items-end gap-2">
-            <button type="button" className="p-3 text-gray-400 hover:text-white transition-colors" title="Attach file (UI only)">
-              <Paperclip size={20} />
+            <input 
+              type="file" 
+              accept="image/*" 
+              className="hidden" 
+              ref={fileInputRef}
+              onChange={handleFileChange}
+            />
+            {selectedModelCategory === "vision" && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-3 text-gray-400 hover:text-white hover:bg-white/10 rounded-xl transition-colors shrink-0"
+              >
+                <Paperclip size={20} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={toggleListening}
+              className={`p-3 rounded-xl transition-colors shrink-0 ${isListening ? 'text-red-500 bg-red-500/20 animate-pulse' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+              title={isListening ? "Stop listening" : "Start voice input"}
+            >
+              <Mic size={20} />
             </button>
             <textarea
               value={input || ""}
@@ -156,7 +277,7 @@ export function ChatInterface({
                 <button
                   type="button"
                   onClick={stop}
-                  className="p-2.5 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-xl transition-colors"
+                  className="p-2.5 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-xl transition-colors disabled:opacity-50"
                 >
                   <Square size={18} fill="currentColor" />
                 </button>

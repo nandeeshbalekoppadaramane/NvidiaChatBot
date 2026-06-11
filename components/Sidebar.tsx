@@ -5,6 +5,7 @@ interface Model {
   id: string;
   name: string;
   owned_by: string;
+  category?: string;
 }
 
 interface ChatSession {
@@ -57,15 +58,26 @@ export function Sidebar({
 
   const filteredModels = useMemo(() => {
     const query = modelSearch.toLowerCase();
-    const grouped: Record<string, Model[]> = {};
+    const grouped: Record<string, Model[]> = {
+      "Vision": [],
+      "Text / Chat": []
+    };
     
     models.forEach((m) => {
       if (m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query) || m.owned_by.toLowerCase().includes(query)) {
-        const provider = m.owned_by;
-        if (!grouped[provider]) grouped[provider] = [];
-        grouped[provider].push(m);
+        if (m.category === "vision") {
+          grouped["Vision"].push(m);
+        } else {
+          grouped["Text / Chat"].push(m);
+        }
       }
     });
+    
+    // Remove empty categories
+    Object.keys(grouped).forEach(k => {
+      if (grouped[k].length === 0) delete grouped[k];
+    });
+    
     return grouped;
   }, [models, modelSearch]);
 
@@ -149,17 +161,17 @@ export function Sidebar({
               />
             </div>
             
-            <div className="flex flex-col gap-1 max-h-[200px] overflow-y-auto bg-[#111] border border-white/10 rounded-lg p-1">
-              {Object.entries(filteredModels).map(([provider, providerModels]) => (
-                <div key={provider}>
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#76B900] px-2 py-1 sticky top-0 bg-[#111] z-10">
-                    {provider} ({providerModels.length})
+            <div className="flex flex-col gap-1 max-h-[200px] overflow-y-auto bg-[#111] border border-white/10 rounded-lg p-1 custom-scrollbar">
+              {Object.entries(filteredModels).map(([category, categoryModels]) => (
+                <div key={category} className="mb-2 last:mb-0">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-[#76B900] px-2 py-1 sticky top-0 bg-[#111] z-10 border-b border-white/5 mb-1">
+                    {category} ({categoryModels.length})
                   </div>
-                  {providerModels.map(m => (
+                  {categoryModels.map(m => (
                     <div 
                       key={m.id}
                       onClick={() => setSelectedModel(m.id)}
-                      className={`p-2 rounded cursor-pointer transition-colors flex flex-col gap-0.5 mx-1 ${selectedModel === m.id ? "bg-[#76B900]/10" : "hover:bg-[#222]"}`}
+                      className={`p-2 rounded cursor-pointer transition-colors flex flex-col gap-0.5 mx-1 ${selectedModel === m.id ? "bg-[#76B900]/10 border border-[#76B900]/30" : "hover:bg-[#222] border border-transparent"}`}
                     >
                       <span className="text-xs font-medium text-white break-all">{m.name}</span>
                       <span className="text-[10px] text-gray-500 uppercase tracking-wider">{m.owned_by}</span>
