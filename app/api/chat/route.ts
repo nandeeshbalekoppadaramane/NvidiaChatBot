@@ -408,7 +408,7 @@ export async function POST(req: Request) {
             emitThink(`[Deep Research] Aggregating context from ${allResults.length} sources and synthesizing final report...\n</think>\n\n`);
             
             // Build context
-            const searchPrompt = buildSearchContext(query, allResults.slice(0, 10)); // Top 10 unique results
+            const searchPrompt = buildSearchContext(query, allResults.slice(0, 6)); // Top 6 unique results
             
             if (formattedMessages[0]?.role === "system") {
               formattedMessages[0].content += "\n\n" + searchPrompt;
@@ -429,7 +429,22 @@ export async function POST(req: Request) {
               stream: true,
             };
             
-            const response = await openai.chat.completions.create(payload);
+            let response;
+            try {
+              response = await openai.chat.completions.create(payload);
+            } catch (apiError: any) {
+              if (apiError.status === 400 || apiError.status === 422 || apiError.status === 503) {
+                emitThink(`[Deep Research] NVIDIA API ${apiError.status} received. Retrying with minimal payload...\n`);
+                delete payload.max_tokens;
+                delete payload.top_p;
+                delete payload.presence_penalty;
+                delete payload.frequency_penalty;
+                response = await openai.chat.completions.create(payload);
+              } else {
+                throw apiError;
+              }
+            }
+            
             const aiStream = OpenAIStream(response as any);
             const reader = aiStream.getReader();
             
@@ -549,8 +564,8 @@ export async function POST(req: Request) {
         apiError.message
       );
 
-      // If the model rejected our strict parameters (400/422), retry with a minimal payload
-      if (apiError.status === 400 || apiError.status === 422) {
+      // If the model rejected our strict parameters (400/422/503), retry with a minimal payload
+      if (apiError.status === 400 || apiError.status === 422 || apiError.status === 503) {
         console.warn(`[Chat] Model rejected parameters. Retrying minimal payload for ${selectedModel}...`);
         delete payload.max_tokens;
         delete payload.top_p;
