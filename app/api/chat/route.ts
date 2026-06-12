@@ -286,6 +286,16 @@ export async function POST(req: Request) {
       return { role: msg.role, content: msg.content };
     });
 
+    // --- Anti-Gibberish Safeguard: Inject explicit system instructions ---
+    // If a system message exists, append our safeguard. Otherwise, create one.
+    const safeguardInstruction = "IMPORTANT: You must always respond in coherent, grammatically correct English unless explicitly asked to translate. Never use gibberish, endless repeating characters, or corrupted text. Maintain a professional and clear tone.";
+    
+    if (formattedMessages.length > 0 && formattedMessages[0].role === "system") {
+      formattedMessages[0].content += `\n\n${safeguardInstruction}`;
+    } else {
+      formattedMessages.unshift({ role: "system", content: safeguardInstruction });
+    }
+
     // ------ Web Search Augmentation ------
     if (webSearchEnabled) {
       const lastUserMsg = [...formattedMessages]
@@ -339,11 +349,17 @@ export async function POST(req: Request) {
     const selectedModel = model || "meta/llama-3.1-70b-instruct";
     const modelConfig = getModelConfig(selectedModel);
 
+    // Enforce safe bounds on temperature to prevent chaotic generation
+    const safeTemp = Math.min(Math.max(temperature ?? 0.7, 0.0), 0.8);
+
     const payload: any = {
       model: selectedModel,
       messages: formattedMessages,
-      temperature: temperature ?? 0.7,
+      temperature: safeTemp,
       max_tokens: modelConfig?.maxTokens ?? DEFAULT_MAX_TOKENS,
+      top_p: 0.9,             // Cuts off the lowest 10% of probability (prevents gibberish)
+      presence_penalty: 0.1,  // Helps prevent repetitive loops
+      frequency_penalty: 0.1, // Helps prevent repeating the exact same words
       stream: true,
     };
 
