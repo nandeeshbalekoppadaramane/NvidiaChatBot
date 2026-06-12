@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Square, Menu, Paperclip, X, Mic, Check, Copy, Globe } from "lucide-react";
+import { Send, Square, Menu, Paperclip, X, Mic, Check, Copy, Globe, PanelLeft, Network, RefreshCw, ArrowDown } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 import { useChat } from "ai/react";
+import TextareaAutosize from 'react-textarea-autosize';
 
 interface ChatInterfaceProps {
-  onOpenSidebar: () => void;
+  onOpenMobileSidebar: () => void;
+  isDesktopSidebarOpen: boolean;
+  onToggleDesktopSidebar: () => void;
   selectedModel: string;
   selectedModelCategory?: string;
   systemPrompt: string;
@@ -18,6 +21,7 @@ interface ChatInterfaceProps {
   initialMessages?: any[];
   onChatCreated?: (id: string) => void;
   onChatUpdated?: () => void;
+  chatTitle?: string;
 }
 
 const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
@@ -34,11 +38,11 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
   if (!inline && match) {
     return (
       <div className="rounded-lg overflow-hidden my-4 border border-white/10 bg-[#1e1e1e] shadow-lg">
-        <div className="flex items-center justify-between px-4 py-2 bg-black/40 border-b border-white/5">
-          <span className="text-xs font-mono text-gray-400 uppercase">{lang}</span>
+        <div className="flex items-center justify-between px-4 py-2 bg-[#111] border-b border-white/10">
+          <span className="text-xs font-mono text-gray-300 capitalize">{lang}</span>
           <button 
             onClick={handleCopy}
-            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 px-2 py-1 rounded transition-colors"
           >
             {copied ? <Check size={14} className="text-[#76B900]" /> : <Copy size={14} />}
             {copied ? "Copied!" : "Copy Code"}
@@ -64,7 +68,9 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
 };
 
 export function ChatInterface({
-  onOpenSidebar,
+  onOpenMobileSidebar,
+  isDesktopSidebarOpen,
+  onToggleDesktopSidebar,
   selectedModel,
   selectedModelCategory = "chat",
   systemPrompt,
@@ -72,6 +78,7 @@ export function ChatInterface({
   apiKey,
   webSearchEnabled = false,
   chatId,
+  chatTitle,
   initialMessages = [],
   onChatCreated,
   onChatUpdated,
@@ -81,8 +88,18 @@ export function ChatInterface({
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const startInputRef = useRef("");
+  const [autoScroll, setAutoScroll] = useState(true);
+  const pendingMessageRef = useRef<any>(null);
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append, error } = useChat({
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+
+  const handleCopyMessage = (content: string, id: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedMessageId(id);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
+  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append, error, reload } = useChat({
     api: "/api/chat",
     initialMessages: systemPrompt ? [{ id: 'system', role: 'system', content: systemPrompt }] : initialMessages,
     headers: {
@@ -122,10 +139,30 @@ export function ChatInterface({
   }, [systemPrompt]);
 
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (autoScroll && messagesEndRef.current) {
+      // Use 'auto' instead of 'smooth' to prevent jittering during fast token streaming
+      messagesEndRef.current.scrollIntoView({ behavior: "auto" });
     }
-  }, [messages]);
+  }, [messages, autoScroll]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLDivElement;
+    // If the user scrolls up more than 100px from the bottom, pause auto-scroll
+    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 100;
+    setAutoScroll(isAtBottom);
+  };
+
+  // Robust Interruption Handler: When the stream stops (isLoading becomes false), send any queued message
+  useEffect(() => {
+    if (!isLoading && pendingMessageRef.current) {
+      const msg = pendingMessageRef.current;
+      pendingMessageRef.current = null;
+      // Wait a short tick to guarantee useChat's internal state machine is completely unlocked
+      setTimeout(() => {
+        append(msg);
+      }, 150);
+    }
+  }, [isLoading, append]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -188,6 +225,31 @@ export function ChatInterface({
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedModel || !(input || "").trim()) return;
+
+    // Claude-style Interruption: Stop current generation and queue the new prompt
+    if (isLoading) {
+      stop(); // Abort the current stream
+      
+      // Queue the new message to be sent exactly when the abort resolves
+      if (selectedModelCategory === "vision" && attachedImage) {
+        pendingMessageRef.current = {
+          id: Date.now().toString(),
+          role: "user",
+          content: input,
+          data: { imageUrl: attachedImage }
+        };
+        setAttachedImage(null);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } else {
+        pendingMessageRef.current = {
+          id: Date.now().toString(),
+          role: "user",
+          content: input,
+        };
+      }
+      handleInputChange({ target: { value: "" } } as any);
+      return;
+    }
 
     if (selectedModelCategory === "vision" && attachedImage) {
       // Send with data attached
@@ -252,7 +314,12 @@ export function ChatInterface({
                    th: ({node, ...props}) => <th className="border-b border-white/20 bg-white/5 p-3 font-semibold text-gray-200" {...props} />,
                    td: ({node, ...props}) => <td className="border-b border-white/5 p-3 text-gray-300 align-top" {...props} />,
                    blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-[#76B900] pl-4 italic text-gray-400 my-4 bg-[#76B900]/5 py-2 pr-2 rounded-r" {...props} />,
-                   a: ({node, ...props}) => <a className="text-[#76B900] hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer" {...props} />
+                   a: ({node, ...props}) => (
+                     <a className="inline-flex items-center gap-1 text-[11px] font-bold text-[#76B900] bg-[#76B900]/10 hover:bg-[#76B900]/20 px-2 py-0.5 rounded-md transition-all mx-0.5 border border-[#76B900]/20 whitespace-nowrap" target="_blank" rel="noopener noreferrer" {...props}>
+                       <Globe size={10} className="opacity-80" />
+                       <span className="truncate max-w-[200px]">{props.children}</span>
+                     </a>
+                   )
                  }}
                >
                  {restContent}
@@ -290,69 +357,113 @@ export function ChatInterface({
 
   return (
     <main className="flex-1 flex flex-col h-full bg-transparent relative z-10">
-      <header className="h-[64px] flex items-center justify-between px-5 glass-panel border-b border-white/5 border-x-0 border-t-0 shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={onOpenSidebar} className="md:hidden text-gray-400 hover:text-white">
+      <header className="h-[64px] flex items-center px-5 glass-panel border-b border-white/5 border-x-0 border-t-0 shrink-0 relative">
+        <div className="flex items-center gap-4 absolute left-5">
+          {!isDesktopSidebarOpen && (
+            <button onClick={onToggleDesktopSidebar} className="hidden md:block text-gray-400 hover:text-white transition-colors" title="Open Sidebar">
+              <PanelLeft size={22} />
+            </button>
+          )}
+          <button onClick={onOpenMobileSidebar} className="md:hidden text-gray-400 hover:text-white transition-colors">
             <Menu size={22} />
           </button>
-          <div>
-            <h2 className="text-sm font-semibold text-white">NVIDIA Chat</h2>
-            <p className="text-xs text-gray-400">{selectedModel || "Select a model to begin"}</p>
+        </div>
+        
+        <div className="flex-1 flex flex-col items-center justify-center pointer-events-none">
+          {chatTitle && chatTitle !== "New Chat" && (
+            <h2 className="text-[13px] font-semibold text-white">{chatTitle}</h2>
+          )}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className={`text-[11px] font-medium ${chatTitle && chatTitle !== "New Chat" ? "text-gray-400" : "text-gray-200"}`}>
+              {selectedModel ? selectedModel.split('/').pop() : "New Chat"}
+            </span>
+            <span className="px-1 py-[1px] rounded-md bg-white/5 border border-white/10 text-[8px] font-mono text-gray-500 tracking-wider">
+              MODEL
+            </span>
           </div>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-6">
+      <div 
+        className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-8 w-full relative"
+        onScroll={handleScroll}
+      >
         {displayMessages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#76B900] to-[#00b4d8] flex items-center justify-center mb-6 shadow-[0_0_60px_rgba(118,185,0,0.2)]">
-               <div className="w-8 h-8 rounded-[50%_50%_50%_8px] bg-bg-deep -rotate-45 relative flex items-center justify-center">
-                 <div className="w-3 h-3 rounded-full bg-[#76B900] shadow-[0_0_8px_rgba(118,185,0,0.8)]" />
-               </div>
+          <div className="flex flex-col items-center justify-center h-full text-center max-w-xl mx-auto mt-10">
+            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_30px_rgba(168,85,247,0.3)] mb-6">
+              <Network size={36} className="text-white" />
             </div>
-            <h2 className="text-2xl font-bold mb-2">How can I help you today?</h2>
-            <p className="text-sm text-gray-400">Select a model from the sidebar and start chatting with NVIDIA's AI models.</p>
+            <h2 className="text-2xl font-bold mb-3 text-white">How can I help you today?</h2>
+            <p className="text-[15px] leading-relaxed text-gray-400">Select a model from the sidebar and start chatting. Enjoy the minimalist experience.</p>
           </div>
         ) : (
           displayMessages.map((msg) => (
             <div 
               key={msg.id} 
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} w-full`}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} w-full max-w-3xl mx-auto`}
             >
-              <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl p-4 ${
+              <div className={`w-full ${
                 msg.role === 'user' 
-                  ? 'bg-gradient-to-br from-[#76B900]/20 to-[#5a8f00]/20 border border-[#76B900]/30 text-white rounded-br-sm' 
-                  : 'bg-white/5 border border-white/10 text-gray-200 rounded-bl-sm glass-panel'
+                  ? 'max-w-[85%] md:max-w-[75%] bg-[#2f2f2f] text-gray-100 rounded-3xl py-3.5 px-5' 
+                  : 'max-w-full text-gray-300'
               }`}>
                 {msg.role === 'assistant' && (
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="w-4 h-4 rounded-full bg-[#76B900] flex items-center justify-center">
-                       <span className="text-[8px] font-bold text-black">AI</span>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
+                      <Network size={14} className="text-white" />
                     </div>
-                    <span className="text-xs font-semibold text-[#76B900]">NVIDIA</span>
+                    <span className="text-[15px] font-semibold text-gray-100">Synapse</span>
+                    {msg.createdAt && (
+                      <span 
+                        className="text-[11px] text-gray-500 font-normal ml-1.5 mt-0.5 cursor-default transition-colors hover:text-gray-400"
+                        title={new Date(msg.createdAt).toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                      >
+                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
                 )}
-                {(msg.data as any)?.imageUrl && msg.role === 'user' ? (
-                  <div className="flex flex-col gap-3">
-                    <img src={(msg.data as any).imageUrl} alt="Upload" className="rounded-lg max-w-sm max-h-64 object-contain shadow-sm border border-gray-100" />
-                    {renderMessageContent(msg.content)}
-                  </div>
-                ) : (
-                  renderMessageContent(msg.content)
-                )}
+                <div className={`${msg.role === 'assistant' ? 'pl-9' : ''} group relative pb-6`}>
+                  {(msg.data as any)?.imageUrl && msg.role === 'user' ? (
+                    <div className="flex flex-col gap-3">
+                      <img src={(msg.data as any).imageUrl} alt="Upload" className="rounded-lg max-w-sm max-h-64 object-contain border border-white/10" />
+                      {renderMessageContent(msg.content)}
+                    </div>
+                  ) : (
+                    renderMessageContent(msg.content)
+                  )}
+
+                  {msg.role === 'assistant' && !isLoading && (
+                    <div className="absolute -bottom-1 left-9 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                      <button onClick={() => handleCopyMessage(msg.content, msg.id)} className="flex items-center gap-1.5 p-1 text-xs text-gray-500 hover:text-white bg-transparent hover:bg-white/10 rounded transition-colors" title="Copy Message">
+                         {copiedMessageId === msg.id ? <Check size={14} className="text-[#76B900]"/> : <Copy size={14} />}
+                      </button>
+                      {msg.id === messages[messages.length - 1]?.id && (
+                        <button onClick={() => reload()} className="flex items-center gap-1.5 p-1 text-xs text-gray-500 hover:text-white bg-transparent hover:bg-white/10 rounded transition-colors" title="Regenerate Response">
+                           <RefreshCw size={14} />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))
         )}
         
         {isLoading && displayMessages[displayMessages.length - 1]?.role === 'user' && (
-          <div className="flex justify-start w-full">
-            <div className="max-w-[85%] rounded-2xl p-4 bg-white/5 border border-white/10 text-gray-200 rounded-bl-sm glass-panel flex items-center gap-3">
-              <div className="flex gap-1.5 items-center">
-                <span className="text-xs text-[#76B900] font-semibold mr-1">Generating</span>
-                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 bg-[#76B900] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="flex justify-start w-full max-w-3xl mx-auto">
+            <div className="max-w-full text-gray-300">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
+                  <Network size={14} className="text-white" />
+                </div>
+                <span className="text-[15px] font-semibold text-gray-100">Synapse</span>
+              </div>
+              <div className="pl-9 flex items-center gap-1.5 h-6">
+                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           </div>
@@ -361,19 +472,32 @@ export function ChatInterface({
 
         {/* Error display */}
         {error && !isLoading && (
-          <div className="flex justify-start w-full">
-            <div className="max-w-[85%] md:max-w-[75%] rounded-2xl p-4 bg-red-500/10 border border-red-500/30 text-red-300 rounded-bl-sm">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-xs font-bold text-red-400">⚠ Error</span>
+          <div className="flex justify-start w-full max-w-3xl mx-auto">
+            <div className="pl-9 w-full">
+              <div className="rounded-2xl p-4 bg-red-500/10 border border-red-500/30 text-red-300">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-bold text-red-400">⚠ Error</span>
+                </div>
+                <p className="text-sm">{error.message || "Something went wrong. Please try again."}</p>
               </div>
-              <p className="text-sm">{error.message || "Something went wrong. Please try again."}</p>
             </div>
           </div>
         )}
       </div>
 
-      <div className="p-4 md:p-6 shrink-0">
-        <div className="max-w-4xl mx-auto glass-panel rounded-2xl border border-white/10 p-2 shadow-2xl focus-within:border-[#76B900]/50 focus-within:shadow-[0_0_30px_rgba(118,185,0,0.15)] transition-all flex flex-col">
+      <div className="p-4 md:p-6 shrink-0 bg-[#1e1e1e]/80 backdrop-blur-md relative">
+        {!autoScroll && messages.length > 0 && (
+          <button 
+            onClick={() => {
+              setAutoScroll(true);
+              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="absolute -top-12 left-1/2 -translate-x-1/2 bg-[#2f2f2f] hover:bg-[#3f3f3f] text-white border border-white/10 rounded-full p-2 shadow-[0_0_20px_rgba(0,0,0,0.5)] transition-all flex items-center justify-center animate-in fade-in slide-in-from-bottom-2"
+          >
+            <ArrowDown size={18} />
+          </button>
+        )}
+        <div className="max-w-3xl mx-auto bg-[#2f2f2f] rounded-3xl p-1.5 focus-within:ring-1 focus-within:ring-gray-500 transition-all flex flex-col">
           {attachedImage && (
             <div className="relative w-16 h-16 ml-2 mt-2 mb-2 group">
               <img src={attachedImage} alt="Attachment preview" className="w-full h-full object-cover rounded-lg border border-white/20" />
@@ -411,15 +535,15 @@ export function ChatInterface({
             >
               <Mic size={20} />
             </button>
-            <textarea
+            <TextareaAutosize
               value={input || ""}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
+              onChange={handleInputChange as any}
+              onKeyDown={handleKeyDown as any}
               placeholder={webSearchEnabled ? "Ask anything (Web Search enabled)..." : "Type a message... (Enter to send, Shift+Enter for newline)"}
-              className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none max-h-[200px] min-h-[44px] py-3"
-              rows={1}
+              className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none py-3 custom-scrollbar"
+              minRows={1}
+              maxRows={8}
               disabled={!selectedModel}
-              style={{ height: 'auto' }}
             />
             <div className="flex items-center gap-2 pr-1 pb-1">
               {webSearchEnabled && (
@@ -427,19 +551,26 @@ export function ChatInterface({
                   <Globe size={16} />
                 </div>
               )}
-              {isLoading ? (
+              
+              {/* Show Stop button ONLY if generating AND input is empty */}
+              {isLoading && !(input || "").trim() && (
                 <button
                   type="button"
                   onClick={stop}
                   className="p-2.5 bg-red-500/20 text-red-500 hover:bg-red-500/30 rounded-xl transition-colors disabled:opacity-50"
+                  title="Stop generation"
                 >
                   <Square size={18} fill="currentColor" />
                 </button>
-              ) : (
+              )}
+              
+              {/* Show Send button if NOT generating, OR if they started typing a new prompt during generation */}
+              {(!isLoading || (input || "").trim().length > 0) && (
                 <button
                   type="submit"
                   disabled={!(input || "").trim() || !selectedModel}
-                  className="p-2.5 bg-gradient-to-br from-[#76B900] to-[#5a8f00] text-black rounded-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(118,185,0,0.3)]"
+                  className="p-2.5 bg-[#76B900] text-black rounded-xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(118,185,0,0.2)]"
+                  title={isLoading ? "Interrupt & Send" : "Send message"}
                 >
                   <Send size={18} />
                 </button>
@@ -448,7 +579,7 @@ export function ChatInterface({
           </form>
         </div>
         <div className="text-center mt-3">
-          <span className="text-[10px] text-gray-500">Responses are generated by NVIDIA AI models and may be inaccurate.</span>
+          <span className="text-[10px] text-gray-500">Synapse AI can make mistakes. Consider verifying important information.</span>
         </div>
       </div>
     </main>

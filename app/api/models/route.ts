@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { CURATED_MODELS } from "@/lib/model-config";
-
-const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const PROVIDER_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
 export async function GET(req: Request) {
   try {
@@ -14,7 +13,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const response = await fetch(`${NVIDIA_BASE_URL}/models`, {
+    const response = await fetch(`${PROVIDER_BASE_URL}/models`, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
@@ -24,14 +23,14 @@ export async function GET(req: Request) {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       return NextResponse.json(
-        { error: errorData.detail || "Failed to fetch models from NVIDIA" },
+        { error: errorData.detail || "Failed to fetch models from provider" },
         { status: response.status }
       );
     }
 
     const data = await response.json();
 
-    // Match NVIDIA models against our curated config
+    // Match provider models against our curated config
     let models = data.data
       .filter((m: any) => {
         const id = m.id.toLowerCase();
@@ -47,7 +46,7 @@ export async function GET(req: Request) {
           category: config.category,
           description: config.description,
           maxTokens: config.maxTokens,
-          owned_by: m.owned_by || "nvidia",
+          owned_by: m.owned_by || "provider",
           created: m.created || null,
         };
       });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Network } from "lucide-react";
 import { motion } from "framer-motion";
 
 interface ApiKeyLoginProps {
@@ -54,27 +54,17 @@ export function ApiKeyLogin({ onLogin }: ApiKeyLoginProps) {
       >
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/5 h-px bg-gradient-to-r from-transparent via-[#76B900] to-transparent" />
         
-        {/* NVIDIA Logo CSS Art */}
-        <div className="flex flex-col items-center gap-2 mb-4">
-          <motion.div
-            animate={{ y: [0, -6, 0] }}
-            transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
-            className="w-14 h-14 rounded-full bg-gradient-to-br from-[#76B900] to-[#00b4d8] flex items-center justify-center shadow-[0_0_60px_rgba(118,185,0,0.25)]"
-          >
-            <div className="w-6 h-6 rounded-[50%_50%_50%_8px] bg-bg-deep -rotate-45 relative flex items-center justify-center">
-              <div className="w-2 h-2 rounded-full bg-[#76B900] shadow-[0_0_8px_rgba(118,185,0,0.8)]" />
-            </div>
-          </motion.div>
-          <div className="text-sm font-extrabold tracking-[6px] text-white indent-[6px]">
-            NVIDIA
+        <div className="flex flex-col items-center gap-2 mb-4 mt-2">
+          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_30px_rgba(168,85,247,0.4)]">
+            <Network size={32} className="text-white" />
           </div>
         </div>
-
-        <h1 className="text-3xl font-extrabold tracking-tight mb-2 bg-gradient-to-br from-white to-[#8dd417] bg-clip-text text-transparent">
-          NVIDIA AI Interface
+        
+        <h1 className="text-3xl font-extrabold tracking-tight mb-2 text-white">
+          Synapse
         </h1>
         <p className="text-sm text-gray-400 mb-8">
-          Connect to NVIDIA's powerful AI models
+          Connect to powerful AI models
         </p>
 
         <form onSubmit={handleConnect} className="text-left mb-6">
@@ -87,7 +77,7 @@ export function ApiKeyLogin({ onLogin }: ApiKeyLoginProps) {
                 type={showKey ? "text" : "password"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="nvapi-xxxxxxxxxxxxxxxxxxxxxxxx"
+                placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
                 className="w-full bg-[#111] border border-white/10 rounded-xl py-3 pl-4 pr-12 text-sm font-mono text-white outline-none focus:border-[#76B900]/50 focus:ring-2 focus:ring-[#76B900]/10 transition-all shadow-[0_0_30px_rgba(118,185,0,0.15)] focus:shadow-[0_0_60px_rgba(118,185,0,0.25)]"
                 required
                 disabled={loading}

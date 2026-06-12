@@ -28,12 +28,7 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} dark antialiased`}
     >
-      <body>
-        {/* Background Grid Animation */}
-        <div className="bg-grid" aria-hidden="true">
-          <div className="grid-lines"></div>
-          <div className="grid-glow"></div>
-        </div>
+      <body className="bg-[#1e1e1e]">
         <Providers>
           {children}
         </Providers>

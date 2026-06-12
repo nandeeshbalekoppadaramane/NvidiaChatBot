@@ -47,8 +47,6 @@ export default function LoginPage() {
         <h1 className="text-2xl font-bold text-center text-white mb-2">Secure Access</h1>
         <p className="text-gray-400 text-center text-sm mb-8">
           Enter your credentials to connect.
-          <br />
-          <span className="text-[10px] text-gray-600 mt-1 block">First login auto-registers the account.</span>
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

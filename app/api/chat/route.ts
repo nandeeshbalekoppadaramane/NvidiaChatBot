@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import * as cheerio from "cheerio";
 import { getModelConfig, DEFAULT_MAX_TOKENS } from "@/lib/model-config";
 
-const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+const PROVIDER_BASE_URL = "https://integrate.api.nvidia.com/v1";
 
 const SEARCH_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
@@ -264,7 +264,7 @@ export async function POST(req: Request) {
     // Fetch API Key from database
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
     if (!settings?.apiKey) {
-      return new Response("NVIDIA API Key not configured in settings", { status: 401 });
+      return new Response("API Key not configured in settings", { status: 401 });
     }
     const apiKey = settings.apiKey;
 
@@ -307,13 +307,18 @@ export async function POST(req: Request) {
           content: typeof lastMessageToSave.content === "string" ? lastMessageToSave.content : JSON.stringify(lastMessageToSave.content),
         },
       });
+      // Bump chat updatedAt to push it to the top
+      await prisma.chat.update({
+        where: { id: currentChatId },
+        data: { updatedAt: new Date() }
+      });
     }
 
-    // Create a custom OpenAI client pointing to NVIDIA's endpoint
+    // Create a custom OpenAI client pointing to the provider's endpoint
     const openai = new OpenAI({
-      baseURL: NVIDIA_BASE_URL,
+      baseURL: PROVIDER_BASE_URL,
       apiKey,
-      timeout: 120000, // 2 min timeout — NIM models can be slow on cold start
+      timeout: 120000, // 2 min timeout
       maxRetries: 0,  // We handle retries ourselves
     });
 
@@ -331,7 +336,7 @@ export async function POST(req: Request) {
         };
       }
 
-      // Only keep what the NVIDIA API expects
+      // Only keep what the Provider API expects
       return { role: msg.role, content: msg.content };
     });
 
@@ -448,7 +453,7 @@ export async function POST(req: Request) {
       } else {
         return new Response(
           JSON.stringify({
-            error: `NVIDIA API error (${apiError.status || "unknown"}): ${apiError.message}`,
+            error: `API error (${apiError.status || "unknown"}): ${apiError.message}`,
           }),
           {
             status: apiError.status || 500,
@@ -468,6 +473,11 @@ export async function POST(req: Request) {
             role: "assistant",
             content: completion,
           },
+        });
+        // Bump chat updatedAt to push it to the top
+        await prisma.chat.update({
+          where: { id: currentChatId },
+          data: { updatedAt: new Date() }
         });
       },
     });

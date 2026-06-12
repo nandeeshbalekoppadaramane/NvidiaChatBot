@@ -23,10 +23,10 @@
 
 @layer base {
   * {
-    @apply border-white/10;
+    @apply border-white/5;
   }
   body {
-    @apply bg-bg-deepest text-white antialiased overflow-hidden h-screen w-screen selection:bg-nv-green/30;
+    @apply bg-[#1e1e1e] text-white antialiased overflow-hidden h-screen w-screen selection:bg-nv-green/30;
   }
   
   /* Custom Scrollbar */
@@ -56,42 +56,4 @@
   .glass-panel {
     @apply bg-glass-bg backdrop-blur-xl border border-glass-border;
   }
-}
-
-/* Background Grid Animation */
-.bg-grid {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-.grid-lines {
-  position: absolute;
-  inset: -50%;
-  width: 200%;
-  height: 200%;
-  background-image:
-    linear-gradient(rgba(118, 185, 0, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(118, 185, 0, 0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-  animation: gridMove 25s linear infinite;
-}
-.grid-glow {
-  position: absolute;
-  top: 30%;
-  left: 50%;
-  width: 800px;
-  height: 800px;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(118, 185, 0, 0.06) 0%, transparent 60%);
-  animation: glowPulse 8s ease-in-out infinite alternate;
-}
-@keyframes gridMove {
-  0% { transform: translate(0, 0); }
-  100% { transform: translate(60px, 60px); }
-}
-@keyframes glowPulse {
-  0% { opacity: 0.4; transform: translate(-50%, -50%) scale(1); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
 }

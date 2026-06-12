@@ -26,7 +26,7 @@ model User {
 model UserSettings {
   id        String   @id @default(cuid())
   userId    String   @unique
-  apiKey    String? // The NVIDIA API key
+  apiKey    String? // The provider API key
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -10,6 +10,7 @@ import { ChatInterface } from "@/components/ChatInterface";
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [isLoadingKey, setIsLoadingKey] = useState(true);
   const [models, setModels] = useState<any[]>([]);
   
   const { data: session, status } = useSession();
@@ -25,7 +26,8 @@ export default function Home() {
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [chatSessionKey, setChatSessionKey] = useState<string>("default");
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
 
   const fetchChats = async () => {
     const res = await fetch("/api/chats");
@@ -38,34 +40,33 @@ export default function Home() {
   // Load settings from local storage
   useEffect(() => {
     setIsMounted(true);
-    const savedModel = localStorage.getItem("nv_last_model");
+    const savedModel = localStorage.getItem("synapse_last_model");
     if (savedModel) setSelectedModel(savedModel);
 
-    const savedTemp = localStorage.getItem("nv_temperature");
+    const savedTemp = localStorage.getItem("synapse_temperature");
     if (savedTemp) setTemperature(parseFloat(savedTemp));
 
-    const savedWebSearch = localStorage.getItem("nv_web_search");
+    const savedWebSearch = localStorage.getItem("synapse_web_search");
     if (savedWebSearch) setWebSearchEnabled(savedWebSearch === "true");
   }, []);
 
   // Fetch API Key & Chat History from database when authenticated
   useEffect(() => {
     if (status === "authenticated") {
+      setIsLoadingKey(true);
       fetch("/api/settings")
         .then(res => res.json())
         .then(data => {
           if (data?.apiKey) setApiKey(data.apiKey);
-        });
+        })
+        .finally(() => setIsLoadingKey(false));
       
       const loadChats = async () => {
         const res = await fetch("/api/chats");
         if (res.ok) {
           const data = await res.json();
           setChatHistory(data);
-          if (data.length > 0 && !currentChatId) {
-            setCurrentChatId(data[0].id);
-            setChatSessionKey(data[0].id);
-          }
+          // We no longer auto-select the first chat; defaulting to New Chat
         }
       };
       loadChats();
@@ -74,15 +75,15 @@ export default function Home() {
 
   // Save UI preferences to local storage when they change
   useEffect(() => {
-    if (isMounted && selectedModel) localStorage.setItem("nv_last_model", selectedModel);
+    if (isMounted && selectedModel) localStorage.setItem("synapse_last_model", selectedModel);
   }, [selectedModel, isMounted]);
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem("nv_temperature", temperature.toString());
+    if (isMounted) localStorage.setItem("synapse_temperature", temperature.toString());
   }, [temperature, isMounted]);
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem("nv_web_search", webSearchEnabled.toString());
+    if (isMounted) localStorage.setItem("synapse_web_search", webSearchEnabled.toString());
   }, [webSearchEnabled, isMounted]);
 
   // Fetch models when API key is set
@@ -127,13 +128,13 @@ export default function Home() {
   const handleNewChat = () => {
     setCurrentChatId(null);
     setChatSessionKey(Date.now().toString());
-    setIsSidebarOpen(false);
+    setIsMobileSidebarOpen(false);
   };
 
   const handleSelectChat = (id: string) => {
     setCurrentChatId(id);
     setChatSessionKey(id);
-    setIsSidebarOpen(false);
+    setIsMobileSidebarOpen(false);
   };
 
   const handleDeleteChat = async (id: string) => {
@@ -144,11 +145,28 @@ export default function Home() {
     }
   };
 
+  const handleRenameChat = async (id: string, newTitle: string) => {
+    await fetch(`/api/chats/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    setChatHistory(prev => prev.map(c => c.id === id ? { ...c, title: newTitle } : c));
+  };
+
   if (!isMounted || status === "loading") return null;
 
   if (status === "unauthenticated") {
     router.push("/login");
     return null;
+  }
+
+  if (isLoadingKey) {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center bg-[#111]">
+        <div className="w-8 h-8 rounded-full border-2 border-[#76B900] border-t-transparent animate-spin mb-4 shadow-[0_0_15px_rgba(118,185,0,0.5)]" />
+      </div>
+    );
   }
 
   if (!apiKey) {
@@ -173,8 +191,10 @@ export default function Home() {
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <Sidebar 
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
+        isMobileOpen={isMobileSidebarOpen}
+        isDesktopOpen={isDesktopSidebarOpen}
+        onMobileClose={() => setIsMobileSidebarOpen(false)}
+        onDesktopToggle={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
         models={models}
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
@@ -189,13 +209,17 @@ export default function Home() {
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
+        onRenameChat={handleRenameChat}
         onLogout={handleLogout}
       />
       <ChatInterface 
         key={chatSessionKey}
         chatId={currentChatId}
+        chatTitle={currentChat?.title}
         initialMessages={initialMessages}
-        onOpenSidebar={() => setIsSidebarOpen(true)}
+        onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+        isDesktopSidebarOpen={isDesktopSidebarOpen}
+        onToggleDesktopSidebar={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
         selectedModel={selectedModel}
         selectedModelCategory={selectedModelCategory}
         systemPrompt={systemPrompt}
