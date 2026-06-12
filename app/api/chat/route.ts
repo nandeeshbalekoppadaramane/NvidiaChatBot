@@ -88,8 +88,53 @@ interface SearchResult {
 }
 
 // ---------------------------------------------------------------------------
-// Brave Search API  (primary — works on Vercel / cloud)
-// Free tier: 2,000 queries/month — https://brave.com/search/api/
+// 1. SearXNG  (primary — self-hosted on Render, no API key needed)
+//    Set SEARXNG_URL env var, e.g. https://my-searxng-instance.onrender.com
+// ---------------------------------------------------------------------------
+
+async function searxngSearch(query: string): Promise<SearchResult[]> {
+  const baseUrl = process.env.SEARXNG_URL;
+  if (!baseUrl) throw new Error("NO_SEARXNG_URL");
+
+  const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json`;
+
+  // Generous timeout — Render free tier cold-starts can take 30-60s
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`SearXNG HTTP ${res.status}: ${body.slice(0, 200)}`);
+    }
+
+    const data = await res.json();
+    const results = data.results || [];
+
+    if (results.length === 0) {
+      throw new Error("SearXNG returned no results.");
+    }
+
+    return results.slice(0, 6).map((r: any) => ({
+      title: r.title || "",
+      snippet: r.content || "",
+      url: r.url || "",
+    }));
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2. Brave Search API  (fallback — requires free API key)
+//    Free: 2,000 queries/month — https://brave.com/search/api/
 // ---------------------------------------------------------------------------
 
 async function braveSearch(query: string): Promise<SearchResult[]> {
@@ -126,7 +171,7 @@ async function braveSearch(query: string): Promise<SearchResult[]> {
 }
 
 // ---------------------------------------------------------------------------
-// DuckDuckGo HTML scraping  (fallback — works locally, blocked on cloud IPs)
+// 3. DuckDuckGo HTML scraping  (last resort — works locally only)
 // ---------------------------------------------------------------------------
 
 async function ddgSearch(query: string): Promise<SearchResult[]> {
@@ -176,21 +221,40 @@ async function ddgSearch(query: string): Promise<SearchResult[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Unified search: Brave → DuckDuckGo fallback → enrich top results
+// Unified search: SearXNG → Brave → DuckDuckGo → enrich top results
 // ---------------------------------------------------------------------------
 
 async function performWebSearch(query: string): Promise<SearchResult[]> {
-  let results: SearchResult[];
+  let results: SearchResult[] | null = null;
 
+  // Try SearXNG first (self-hosted, free, no key)
   try {
-    results = await braveSearch(query);
-    console.log(`[Search] Brave returned ${results.length} results`);
-  } catch (braveErr: any) {
-    if (braveErr.message === "NO_BRAVE_KEY") {
-      console.log("[Search] No BRAVE_SEARCH_API_KEY set, falling back to DuckDuckGo");
+    results = await searxngSearch(query);
+    console.log(`[Search] SearXNG returned ${results.length} results`);
+  } catch (err: any) {
+    if (err.message === "NO_SEARXNG_URL") {
+      console.log("[Search] No SEARXNG_URL set, trying next backend...");
     } else {
-      console.warn("[Search] Brave failed, falling back to DuckDuckGo:", braveErr.message);
+      console.warn("[Search] SearXNG failed:", err.message);
     }
+  }
+
+  // Try Brave Search (needs API key but works on cloud)
+  if (!results) {
+    try {
+      results = await braveSearch(query);
+      console.log(`[Search] Brave returned ${results.length} results`);
+    } catch (err: any) {
+      if (err.message === "NO_BRAVE_KEY") {
+        console.log("[Search] No BRAVE_SEARCH_API_KEY set, trying DuckDuckGo...");
+      } else {
+        console.warn("[Search] Brave failed:", err.message);
+      }
+    }
+  }
+
+  // Last resort: DuckDuckGo scraping (works locally, blocked on cloud)
+  if (!results) {
     results = await ddgSearch(query);
     console.log(`[Search] DuckDuckGo returned ${results.length} results`);
   }
