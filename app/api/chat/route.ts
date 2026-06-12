@@ -377,10 +377,14 @@ export async function POST(req: Request) {
         apiError.message
       );
 
-      // If the model rejected max_tokens (400/422), retry without it
+      // If the model rejected our strict parameters (400/422), retry with a minimal payload
       if (apiError.status === 400 || apiError.status === 422) {
-        console.warn("Retrying without max_tokens...");
+        console.warn(`[Chat] Model rejected parameters. Retrying minimal payload for ${selectedModel}...`);
         delete payload.max_tokens;
+        delete payload.top_p;
+        delete payload.presence_penalty;
+        delete payload.frequency_penalty;
+        
         try {
           response = await openai.chat.completions.create(payload);
         } catch (retryError: any) {
