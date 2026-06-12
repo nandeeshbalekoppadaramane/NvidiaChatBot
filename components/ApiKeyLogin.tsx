@@ -6,10 +6,9 @@ import { motion } from "framer-motion";
 
 interface ApiKeyLoginProps {
   onLogin: (apiKey: string) => void;
-  savedKey: string | null;
 }
 
-export function ApiKeyLogin({ onLogin, savedKey }: ApiKeyLoginProps) {
+export function ApiKeyLogin({ onLogin }: ApiKeyLoginProps) {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -44,25 +43,6 @@ export function ApiKeyLogin({ onLogin, savedKey }: ApiKeyLoginProps) {
     }
   };
 
-  const handleAutoLogin = async () => {
-    if (!savedKey) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/models", {
-        headers: { Authorization: `Bearer ${savedKey}` },
-      });
-      if (!res.ok) {
-        throw new Error("Saved API Key is no longer valid. Please enter a new one.");
-      }
-      onLogin(savedKey);
-    } catch (err: any) {
-      setError(err.message);
-      // If saved key is invalid, we might want to clear it, but let's leave that to the parent
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <div className="flex items-center justify-center min-h-screen p-6">
@@ -138,15 +118,6 @@ export function ApiKeyLogin({ onLogin, savedKey }: ApiKeyLoginProps) {
           </button>
         </form>
 
-        {savedKey && (
-          <button
-            onClick={handleAutoLogin}
-            disabled={loading}
-            className="w-full bg-transparent border border-white/10 text-white text-sm py-2.5 rounded-xl hover:border-[#76B900] hover:text-[#76B900] hover:shadow-[inset_0_0_20px_rgba(118,185,0,0.05)] transition-all disabled:opacity-50"
-          >
-            Connect using saved key
-          </button>
-        )}
 
         {error && (
           <motion.div

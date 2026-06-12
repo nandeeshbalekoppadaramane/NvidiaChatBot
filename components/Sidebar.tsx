@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { X, Plus, Search, Settings2, Download, LogOut, MessageSquare, Trash2 } from "lucide-react";
+import { X, Plus, Search, Settings2, Download, LogOut, MessageSquare, Trash2, UserCircle } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 
 interface Model {
   id: string;
@@ -57,6 +58,7 @@ export function Sidebar({
   onLogout,
 }: SidebarProps) {
   const [modelSearch, setModelSearch] = useState("");
+  const { data: session } = useSession();
 
   const filteredModels = useMemo(() => {
     const query = modelSearch.toLowerCase();
@@ -134,7 +136,12 @@ export function Sidebar({
                   >
                     <span className="truncate flex-1"><MessageSquare size={14} className="inline mr-2 opacity-50"/>{chat.title}</span>
                     <button 
-                      onClick={(e) => { e.stopPropagation(); onDeleteChat(chat.id); }}
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        if (window.confirm("Are you sure you want to delete this chat?")) {
+                          onDeleteChat(chat.id); 
+                        }
+                      }}
                       className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 transition-opacity"
                     >
                       <Trash2 size={14} />
@@ -216,9 +223,9 @@ export function Sidebar({
                 onChange={(e) => setTemperature(parseFloat(e.target.value))}
                 className="w-full accent-[#76B900]"
               />
-              <div className="flex justify-between text-[10px] text-gray-600">
+              <div className="flex justify-between text-[9px] text-gray-500 font-mono mt-1">
                 <span>0.0</span>
-                <span>2.0</span>
+                <span>1.0</span>
               </div>
             </div>
 
@@ -262,13 +269,31 @@ export function Sidebar({
              </div>
            </div>
            
-           <button 
-            onClick={onLogout}
-            className="w-full flex items-center justify-center gap-2 border border-white/5 hover:bg-red-500/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 py-2 rounded-xl text-xs transition-colors"
-           >
-             <LogOut size={14} />
-             Change API Key
-           </button>
+           {/* Account Settings */}
+          <div className="pt-2 border-t border-white/10 mt-2 space-y-2">
+            <div className="flex items-center gap-2 p-2 bg-white/5 rounded-lg border border-white/5 mb-2">
+              <UserCircle size={24} className="text-[#76B900]" />
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-white capitalize">{session?.user?.name || "User"}</span>
+                <span className="text-[10px] text-gray-500">Authenticated</span>
+              </div>
+            </div>
+
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center justify-center gap-2 border border-white/5 hover:bg-orange-500/10 hover:border-orange-500/30 text-gray-400 hover:text-orange-400 py-2 rounded-xl text-xs transition-colors"
+            >
+              <Settings2 size={14} />
+              Clear API Key
+            </button>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="w-full flex items-center justify-center gap-2 border border-white/5 hover:bg-red-500/10 hover:border-red-500/30 text-gray-400 hover:text-red-400 py-2 rounded-xl text-xs transition-colors"
+            >
+              <LogOut size={14} />
+              Sign Out Account
+            </button>
+          </div>
         </div>
       </aside>
     </>

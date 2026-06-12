@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { ApiKeyLogin } from "@/components/ApiKeyLogin";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatInterface } from "@/components/ChatInterface";
@@ -9,6 +11,9 @@ export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [models, setModels] = useState<any[]>([]);
+  
+  const { data: session, status } = useSession();
+  const router = useRouter();
   
   // Settings
   const [selectedModel, setSelectedModel] = useState("");
@@ -19,14 +24,20 @@ export default function Home() {
   // Chat state
   const [chatHistory, setChatHistory] = useState<any[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [chatSessionKey, setChatSessionKey] = useState<string>("default");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  // Load from local storage
+  const fetchChats = async () => {
+    const res = await fetch("/api/chats");
+    if (res.ok) {
+      const data = await res.json();
+      setChatHistory(data);
+    }
+  };
+
+  // Load settings from local storage
   useEffect(() => {
     setIsMounted(true);
-    const savedKey = localStorage.getItem("nv_api_key");
-    if (savedKey) setApiKey(savedKey);
-
     const savedModel = localStorage.getItem("nv_last_model");
     if (savedModel) setSelectedModel(savedModel);
 
@@ -35,16 +46,33 @@ export default function Home() {
 
     const savedWebSearch = localStorage.getItem("nv_web_search");
     if (savedWebSearch) setWebSearchEnabled(savedWebSearch === "true");
-
-    const savedHistory = localStorage.getItem("nv_history");
-    if (savedHistory) {
-      try {
-        setChatHistory(JSON.parse(savedHistory));
-      } catch (e) {}
-    }
   }, []);
 
-  // Save settings to local storage when they change
+  // Fetch API Key & Chat History from database when authenticated
+  useEffect(() => {
+    if (status === "authenticated") {
+      fetch("/api/settings")
+        .then(res => res.json())
+        .then(data => {
+          if (data?.apiKey) setApiKey(data.apiKey);
+        });
+      
+      const loadChats = async () => {
+        const res = await fetch("/api/chats");
+        if (res.ok) {
+          const data = await res.json();
+          setChatHistory(data);
+          if (data.length > 0 && !currentChatId) {
+            setCurrentChatId(data[0].id);
+            setChatSessionKey(data[0].id);
+          }
+        }
+      };
+      loadChats();
+    }
+  }, [status]);
+
+  // Save UI preferences to local storage when they change
   useEffect(() => {
     if (isMounted && selectedModel) localStorage.setItem("nv_last_model", selectedModel);
   }, [selectedModel, isMounted]);
@@ -56,14 +84,6 @@ export default function Home() {
   useEffect(() => {
     if (isMounted) localStorage.setItem("nv_web_search", webSearchEnabled.toString());
   }, [webSearchEnabled, isMounted]);
-
-  useEffect(() => {
-    if (isMounted && apiKey) localStorage.setItem("nv_api_key", apiKey);
-  }, [apiKey, isMounted]);
-
-  useEffect(() => {
-    if (isMounted) localStorage.setItem("nv_history", JSON.stringify(chatHistory));
-  }, [chatHistory, isMounted]);
 
   // Fetch models when API key is set
   useEffect(() => {
@@ -84,38 +104,55 @@ export default function Home() {
     }
   }, [apiKey]);
 
-  const handleLogin = (key: string) => {
+  const handleLogin = async (key: string) => {
+    // Save to database
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: key })
+    });
     setApiKey(key);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // We do NOT log out of the whole app, we just remove the API key
+    await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "" })
+    });
     setApiKey(null);
-    localStorage.removeItem("nv_api_key");
   };
 
   const handleNewChat = () => {
-    setCurrentChatId(Date.now().toString());
-    // We would clear the useChat messages here if we could, 
-    // but the ChatInterface component handles its own hook.
-    // By giving it a unique key based on currentChatId, it will remount and reset!
+    setCurrentChatId(null);
+    setChatSessionKey(Date.now().toString());
+    setIsSidebarOpen(false);
   };
 
   const handleSelectChat = (id: string) => {
     setCurrentChatId(id);
+    setChatSessionKey(id);
     setIsSidebarOpen(false);
   };
 
-  const handleDeleteChat = (id: string) => {
+  const handleDeleteChat = async (id: string) => {
+    await fetch(`/api/chats/${id}`, { method: "DELETE" });
     setChatHistory(prev => prev.filter(c => c.id !== id));
     if (currentChatId === id) {
       setCurrentChatId(null);
     }
   };
 
-  if (!isMounted) return null;
+  if (!isMounted || status === "loading") return null;
+
+  if (status === "unauthenticated") {
+    router.push("/login");
+    return null;
+  }
 
   if (!apiKey) {
-    return <ApiKeyLogin onLogin={handleLogin} savedKey={localStorage.getItem("nv_api_key")} />;
+    return <ApiKeyLogin onLogin={handleLogin} />;
   }
 
   // The chat UI
@@ -129,6 +166,9 @@ export default function Home() {
       selectedModelCategory = "chat";
     }
   }
+
+  const currentChat = chatHistory.find(c => c.id === currentChatId);
+  const initialMessages = currentChat?.messages || [];
 
   return (
     <div className="flex h-screen w-full overflow-hidden">
@@ -152,7 +192,9 @@ export default function Home() {
         onLogout={handleLogout}
       />
       <ChatInterface 
-        key={currentChatId || 'default'}
+        key={chatSessionKey}
+        chatId={currentChatId}
+        initialMessages={initialMessages}
         onOpenSidebar={() => setIsSidebarOpen(true)}
         selectedModel={selectedModel}
         selectedModelCategory={selectedModelCategory}
@@ -160,6 +202,12 @@ export default function Home() {
         temperature={temperature}
         apiKey={apiKey}
         webSearchEnabled={webSearchEnabled}
+        onChatCreated={(newId) => {
+          setCurrentChatId(newId);
+          // Instantly refresh from DB to get the smart title Claude-style
+          fetchChats();
+        }}
+        onChatUpdated={fetchChats}
       />
     </div>
   );

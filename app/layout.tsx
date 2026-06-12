@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "@/components/Providers";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -33,7 +34,9 @@ export default function RootLayout({
           <div className="grid-lines"></div>
           <div className="grid-glow"></div>
         </div>
-        {children}
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   );

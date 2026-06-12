@@ -1,5 +1,8 @@
 import OpenAI from "openai";
 import { OpenAIStream, StreamingTextResponse } from "ai";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import * as cheerio from "cheerio";
 import { getModelConfig, DEFAULT_MAX_TOKENS } from "@/lib/model-config";
 
@@ -252,13 +255,59 @@ INSTRUCTIONS:
 
 export async function POST(req: Request) {
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response("Missing API Key", { status: 401 });
-    }
-    const apiKey = authHeader.split(" ")[1];
+    const session = await getServerSession(authOptions);
+    if (!session?.user) return new Response("Unauthorized", { status: 401 });
+    const userId = (session.user as any).id;
 
-    const { messages, model, temperature, webSearchEnabled } = await req.json();
+    const { messages, model, temperature, webSearchEnabled, chatId } = await req.json();
+
+    // Fetch API Key from database
+    const settings = await prisma.userSettings.findUnique({ where: { userId } });
+    if (!settings?.apiKey) {
+      return new Response("NVIDIA API Key not configured in settings", { status: 401 });
+    }
+    const apiKey = settings.apiKey;
+
+    let currentChatId = chatId;
+    
+    // Auto-create chat if it doesn't exist
+    if (!currentChatId) {
+      const lastMessage = messages[messages.length - 1];
+      let title = "New Chat";
+      
+      if (lastMessage && lastMessage.role === "user" && typeof lastMessage.content === "string") {
+        const text = lastMessage.content.trim().split('\n')[0]; // Take first line
+        if (text.length > 35) {
+          const truncated = text.slice(0, 35);
+          const lastSpace = truncated.lastIndexOf(' ');
+          title = (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + "...";
+        } else {
+          title = text || "New Chat";
+        }
+        // Capitalize first letter like Claude does
+        title = title.charAt(0).toUpperCase() + title.slice(1);
+      }
+        
+      const newChat = await prisma.chat.create({
+        data: {
+          title,
+          userId,
+        }
+      });
+      currentChatId = newChat.id;
+    }
+
+    // Save the incoming user message to the database
+    const lastMessageToSave = messages[messages.length - 1];
+    if (lastMessageToSave && lastMessageToSave.role === "user") {
+      await prisma.message.create({
+        data: {
+          chatId: currentChatId,
+          role: "user",
+          content: typeof lastMessageToSave.content === "string" ? lastMessageToSave.content : JSON.stringify(lastMessageToSave.content),
+        },
+      });
+    }
 
     // Create a custom OpenAI client pointing to NVIDIA's endpoint
     const openai = new OpenAI({
@@ -410,9 +459,24 @@ export async function POST(req: Request) {
     }
 
     // Convert OpenAI response to AI SDK stream
-    const stream = OpenAIStream(response as any);
+    const stream = OpenAIStream(response as any, {
+      async onCompletion(completion) {
+        // Save the AI's response to the database once the stream finishes
+        await prisma.message.create({
+          data: {
+            chatId: currentChatId,
+            role: "assistant",
+            content: completion,
+          },
+        });
+      },
+    });
 
-    return new StreamingTextResponse(stream);
+    return new StreamingTextResponse(stream, {
+      headers: {
+        "x-chat-id": currentChatId,
+      },
+    });
   } catch (error) {
     console.error("Chat API Error:", error);
     return new Response(

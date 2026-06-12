@@ -9,11 +9,15 @@ import { useChat } from "ai/react";
 interface ChatInterfaceProps {
   onOpenSidebar: () => void;
   selectedModel: string;
+  selectedModelCategory?: string;
   systemPrompt: string;
   temperature: number;
   apiKey: string;
-  selectedModelCategory?: string;
-  webSearchEnabled?: boolean;
+  webSearchEnabled: boolean;
+  chatId: string | null;
+  initialMessages?: any[];
+  onChatCreated?: (id: string) => void;
+  onChatUpdated?: () => void;
 }
 
 const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
@@ -62,11 +66,15 @@ const CodeBlock = ({ node, inline, className, children, ...props }: any) => {
 export function ChatInterface({
   onOpenSidebar,
   selectedModel,
+  selectedModelCategory = "chat",
   systemPrompt,
   temperature,
   apiKey,
-  selectedModelCategory = "chat",
-  webSearchEnabled = false
+  webSearchEnabled = false,
+  chatId,
+  initialMessages = [],
+  onChatCreated,
+  onChatUpdated,
 }: ChatInterfaceProps) {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +84,7 @@ export function ChatInterface({
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append, error } = useChat({
     api: "/api/chat",
+    initialMessages: systemPrompt ? [{ id: 'system', role: 'system', content: systemPrompt }] : initialMessages,
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
@@ -83,8 +92,17 @@ export function ChatInterface({
       model: selectedModel,
       temperature,
       webSearchEnabled,
+      chatId,
     },
-    initialMessages: systemPrompt ? [{ id: 'system', role: 'system', content: systemPrompt }] : [],
+    onResponse: (response) => {
+      const newChatId = response.headers.get("x-chat-id");
+      if (newChatId && !chatId && onChatCreated) {
+        onChatCreated(newChatId);
+      }
+    },
+    onFinish: () => {
+      if (onChatUpdated) onChatUpdated();
+    },
     onError: (error) => {
       console.error("Chat Error:", error);
     }
