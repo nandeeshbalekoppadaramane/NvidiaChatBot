@@ -17,6 +17,7 @@ interface ChatInterfaceProps {
   temperature: number;
   apiKey: string;
   webSearchEnabled: boolean;
+  deepResearchEnabled?: boolean;
   chatId: string | null;
   initialMessages?: any[];
   onChatCreated?: (id: string) => void;
@@ -77,6 +78,7 @@ export function ChatInterface({
   temperature,
   apiKey,
   webSearchEnabled = false,
+  deepResearchEnabled = false,
   chatId,
   chatTitle,
   initialMessages = [],
@@ -109,6 +111,7 @@ export function ChatInterface({
       model: selectedModel,
       temperature,
       webSearchEnabled,
+      deepResearchEnabled,
       chatId,
     },
     onResponse: (response) => {
@@ -539,7 +542,7 @@ export function ChatInterface({
               value={input || ""}
               onChange={handleInputChange as any}
               onKeyDown={handleKeyDown as any}
-              placeholder={webSearchEnabled ? "Ask anything (Web Search enabled)..." : "Type a message... (Enter to send, Shift+Enter for newline)"}
+              placeholder={deepResearchEnabled ? "Ask a complex question for Deep Research (Agent mode)..." : webSearchEnabled ? "Ask anything (Web Search enabled)..." : "Type a message... (Enter to send, Shift+Enter for newline)"}
               className="flex-1 bg-transparent border-none outline-none text-sm text-white resize-none py-3 custom-scrollbar"
               minRows={1}
               maxRows={8}
@@ -547,7 +550,7 @@ export function ChatInterface({
             />
             <div className="flex items-center gap-2 pr-1 pb-1">
               {webSearchEnabled && (
-                <div className="hidden sm:flex items-center justify-center p-1.5 mr-1 text-[#76B900] bg-[#76B900]/10 rounded-full" title="Web Search Enabled">
+                <div className={`hidden sm:flex items-center justify-center p-1.5 mr-1 ${deepResearchEnabled ? 'text-purple-400 bg-purple-500/10' : 'text-[#76B900] bg-[#76B900]/10'} rounded-full`} title={deepResearchEnabled ? "Deep Research Enabled" : "Web Search Enabled"}>
                   <Globe size={16} />
                 </div>
               )}

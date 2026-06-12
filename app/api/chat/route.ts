@@ -259,7 +259,7 @@ export async function POST(req: Request) {
     if (!session?.user) return new Response("Unauthorized", { status: 401 });
     const userId = (session.user as any).id;
 
-    const { messages, model, temperature, webSearchEnabled, chatId } = await req.json();
+    const { messages, model, temperature, webSearchEnabled, deepResearchEnabled, chatId } = await req.json();
 
     // Fetch API Key from database
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
@@ -348,6 +348,124 @@ export async function POST(req: Request) {
       formattedMessages[0].content += `\n\n${safeguardInstruction}`;
     } else {
       formattedMessages.unshift({ role: "system", content: safeguardInstruction });
+    }
+
+    // ------ Deep Research Augmentation ------
+    if (deepResearchEnabled) {
+      const lastUserMsg = [...formattedMessages].reverse().find((m: any) => m.role === "user");
+      let query = "the topic";
+      if (lastUserMsg) {
+        if (typeof lastUserMsg.content === "string") {
+          query = lastUserMsg.content;
+        } else if (Array.isArray(lastUserMsg.content)) {
+          const textPart = lastUserMsg.content.find((c: any) => c.type === "text");
+          if (textPart) query = textPart.text;
+        }
+      }
+
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          const emitThink = (text: string) => controller.enqueue(encoder.encode(text));
+          
+          try {
+            emitThink("<think>\n[Deep Research] Initializing autonomous agent...\n");
+            
+            // Phase 1: Generate Queries
+            emitThink("[Deep Research] Generating search strategies...\n");
+            const queryPrompt = `Generate 3 distinct search queries to thoroughly research the following topic from different angles. Topic: "${query}". Return only the 3 queries separated by newlines, with no bullet points, numbers, or quotes.`;
+            
+            const queryResponse = await openai.chat.completions.create({
+              model: "meta/llama-3.1-8b-instruct",
+              messages: [{ role: "user", content: queryPrompt }],
+              temperature: 0.5,
+              max_tokens: 100,
+            });
+            
+            let queries = (queryResponse.choices[0].message.content || query)
+              .split("\n")
+              .map(q => q.trim().replace(/^[\d\.\-\"\'\s]+/, ''))
+              .filter(Boolean)
+              .slice(0, 3);
+            
+            if (queries.length === 0) queries = [query];
+            
+            emitThink(`[Deep Research] Running parallel searches for:\n- ${queries.join("\n- ")}\n`);
+            
+            // Phase 2: Parallel Searches
+            const searchPromises = queries.map(q => performWebSearch(q).catch(() => []));
+            const resultsArrays = await Promise.all(searchPromises);
+            
+            // Deduplicate
+            let allResults = resultsArrays.flat();
+            const seen = new Set();
+            allResults = allResults.filter(r => {
+               if (seen.has(r.url)) return false;
+               seen.add(r.url);
+               return true;
+            });
+            
+            emitThink(`[Deep Research] Aggregating context from ${allResults.length} sources and synthesizing final report...\n</think>\n\n`);
+            
+            // Build context
+            const searchPrompt = buildSearchContext(query, allResults.slice(0, 10)); // Top 10 unique results
+            
+            if (formattedMessages[0]?.role === "system") {
+              formattedMessages[0].content += "\n\n" + searchPrompt;
+            } else {
+              formattedMessages.unshift({ role: "system", content: searchPrompt });
+            }
+            
+            // Phase 3: Final LLM Generation
+            const safeTemp = Math.min(Math.max(temperature ?? 0.7, 0.0), 1.0);
+            const selectedModel = model || "meta/llama-3.1-70b-instruct";
+            const modelConfig = getModelConfig(selectedModel);
+            
+            const payload: any = {
+              model: selectedModel,
+              messages: formattedMessages,
+              temperature: safeTemp,
+              max_tokens: modelConfig?.maxTokens ?? DEFAULT_MAX_TOKENS,
+              stream: true,
+            };
+            
+            const response = await openai.chat.completions.create(payload);
+            const aiStream = OpenAIStream(response as any);
+            const reader = aiStream.getReader();
+            
+            let fullCompletion = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              controller.enqueue(value);
+              fullCompletion += new TextDecoder().decode(value);
+            }
+            
+            // Save to DB
+            const finalContent = "<think>\n[Deep Research] Initializing autonomous agent...\n[Deep Research] Generating search strategies...\n[Deep Research] Running parallel searches for:\n- " + queries.join("\n- ") + "\n[Deep Research] Aggregating context from " + allResults.length + " sources and synthesizing final report...\n</think>\n\n" + fullCompletion;
+            
+            await prisma.message.create({
+              data: { chatId: currentChatId, role: "assistant", content: finalContent },
+            });
+            await prisma.chat.update({
+              where: { id: currentChatId },
+              data: { updatedAt: new Date() }
+            });
+            
+          } catch (e: any) {
+            emitThink(`\n**Deep Research Error**: ${e.message}\n</think>\n\nSorry, the deep research agent encountered an error: ${e.message}`);
+          } finally {
+            controller.close();
+          }
+        }
+      });
+      
+      return new Response(stream, {
+        headers: {
+          "x-chat-id": currentChatId!,
+          "Content-Type": "text/plain; charset=utf-8"
+        }
+      });
     }
 
     // ------ Web Search Augmentation ------

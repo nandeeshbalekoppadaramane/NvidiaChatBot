@@ -34,6 +34,8 @@ interface SidebarProps {
   currentChatId: string | null;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (val: boolean) => void;
+  deepResearchEnabled: boolean;
+  setDeepResearchEnabled: (val: boolean) => void;
   onSelectChat: (id: string) => void;
   onNewChat: () => void;
   onDeleteChat: (id: string) => void;
@@ -57,6 +59,8 @@ export function Sidebar({
   currentChatId,
   webSearchEnabled,
   setWebSearchEnabled,
+  deepResearchEnabled,
+  setDeepResearchEnabled,
   onSelectChat,
   onNewChat,
   onDeleteChat,
@@ -71,6 +75,7 @@ export function Sidebar({
   const [localTemp, setLocalTemp] = useState(temperature);
   const [localPrompt, setLocalPrompt] = useState(systemPrompt);
   const [localSearch, setLocalSearch] = useState(webSearchEnabled);
+  const [localDeepResearch, setLocalDeepResearch] = useState(deepResearchEnabled);
 
   useEffect(() => {
     if (isSettingsOpen) {
@@ -78,14 +83,16 @@ export function Sidebar({
       setLocalTemp(temperature);
       setLocalPrompt(systemPrompt);
       setLocalSearch(webSearchEnabled);
+      setLocalDeepResearch(deepResearchEnabled);
     }
-  }, [isSettingsOpen, selectedModel, temperature, systemPrompt, webSearchEnabled]);
+  }, [isSettingsOpen, selectedModel, temperature, systemPrompt, webSearchEnabled, deepResearchEnabled]);
 
   const handleSaveSettings = () => {
     setSelectedModel(localModel);
     setTemperature(localTemp);
     setSystemPrompt(localPrompt);
     setWebSearchEnabled(localSearch);
+    setDeepResearchEnabled(localDeepResearch);
     setIsSettingsOpen(false);
   };
   
@@ -230,13 +237,23 @@ export function Sidebar({
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors mt-2" onClick={() => setLocalSearch(!localSearch)}>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors mt-2" onClick={() => { setLocalSearch(!localSearch); if (!localSearch) setLocalDeepResearch(false); }}>
                   <div className="flex flex-col">
                     <span className="text-sm font-medium text-gray-200">Web Search</span>
                     <span className="text-xs text-gray-500 mt-0.5">Augment AI with live data</span>
                   </div>
                   <div className={`w-10 h-5 rounded-full flex items-center p-0.5 transition-colors ${localSearch ? 'bg-[#76B900]' : 'bg-gray-700'}`}>
                     <div className={`w-4 h-4 rounded-full bg-white transition-transform ${localSearch ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </div>
+                
+                <div className={`flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!localSearch ? 'opacity-50' : ''}`} onClick={() => { if (localSearch) setLocalDeepResearch(!localDeepResearch); }}>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-gray-200 flex items-center gap-2">Deep Research <span className="text-[9px] font-bold uppercase tracking-widest bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Pro</span></span>
+                    <span className="text-xs text-gray-500 mt-0.5">Agentic multi-query scraping</span>
+                  </div>
+                  <div className={`w-10 h-5 rounded-full flex items-center p-0.5 transition-colors ${localDeepResearch ? 'bg-purple-500' : 'bg-gray-700'}`}>
+                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${localDeepResearch ? 'translate-x-5' : 'translate-x-0'}`} />
                   </div>
                 </div>
               </div>

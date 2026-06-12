@@ -21,6 +21,7 @@ export default function Home() {
   const [temperature, setTemperature] = useState(0.7);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   
   // Chat state
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -48,6 +49,9 @@ export default function Home() {
 
     const savedWebSearch = localStorage.getItem("synapse_web_search");
     if (savedWebSearch) setWebSearchEnabled(savedWebSearch === "true");
+
+    const savedDeepResearch = localStorage.getItem("synapse_deep_research");
+    if (savedDeepResearch) setDeepResearchEnabled(savedDeepResearch === "true");
   }, []);
 
   // Fetch API Key & Chat History from database when authenticated
@@ -85,6 +89,10 @@ export default function Home() {
   useEffect(() => {
     if (isMounted) localStorage.setItem("synapse_web_search", webSearchEnabled.toString());
   }, [webSearchEnabled, isMounted]);
+
+  useEffect(() => {
+    if (isMounted) localStorage.setItem("synapse_deep_research", deepResearchEnabled.toString());
+  }, [deepResearchEnabled, isMounted]);
 
   // Fetch models when API key is set
   useEffect(() => {
@@ -202,10 +210,12 @@ export default function Home() {
         setTemperature={setTemperature}
         systemPrompt={systemPrompt}
         setSystemPrompt={setSystemPrompt}
-        chatHistory={chatHistory}
-        currentChatId={currentChatId}
         webSearchEnabled={webSearchEnabled}
         setWebSearchEnabled={setWebSearchEnabled}
+        deepResearchEnabled={deepResearchEnabled}
+        setDeepResearchEnabled={setDeepResearchEnabled}
+        chatHistory={chatHistory}
+        currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
@@ -226,6 +236,7 @@ export default function Home() {
         temperature={temperature}
         apiKey={apiKey}
         webSearchEnabled={webSearchEnabled}
+        deepResearchEnabled={deepResearchEnabled}
         onChatCreated={(newId) => {
           setCurrentChatId(newId);
           // Instantly refresh from DB to get the smart title Claude-style
