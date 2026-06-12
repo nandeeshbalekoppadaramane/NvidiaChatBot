@@ -366,7 +366,7 @@ export async function POST(req: Request) {
       const stream = new ReadableStream({
         async start(controller) {
           const encoder = new TextEncoder();
-          const emitThink = (text: string) => controller.enqueue(encoder.encode(text));
+          const emitThink = (text: string) => controller.enqueue(encoder.encode(`0:${JSON.stringify(text)}\n`));
           
           try {
             emitThink("<think>\n[Deep Research] Initializing autonomous agent...\n");
