@@ -1,8 +1,186 @@
 import OpenAI from "openai";
 import { OpenAIStream, StreamingTextResponse } from "ai";
 import * as cheerio from "cheerio";
+import { getModelConfig, DEFAULT_MAX_TOKENS } from "@/lib/model-config";
 
 const NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1";
+
+const SEARCH_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+// ---------------------------------------------------------------------------
+// Web Search Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch a URL and extract the main text content using cheerio.
+ * Returns empty string on any failure (timeout, non-HTML, network error).
+ */
+async function fetchPageContent(
+  url: string,
+  maxChars: number = 2500
+): Promise<string> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": SEARCH_USER_AGENT },
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return "";
+
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) return "";
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // Strip non-content elements
+    $(
+      "script, style, nav, footer, header, aside, iframe, noscript, svg, form, button, " +
+        "[role='navigation'], [role='banner'], [role='complementary'], .sidebar, .menu, .ad, .advertisement"
+    ).remove();
+
+    // Try dedicated content containers first
+    let text = "";
+    const contentSelectors = [
+      "article",
+      "main",
+      "[role='main']",
+      ".post-content",
+      ".article-body",
+      ".entry-content",
+      ".article-content",
+      "#article-body",
+      ".story-body",
+      "#content",
+      ".content",
+    ];
+
+    for (const sel of contentSelectors) {
+      const el = $(sel);
+      if (el.length && el.text().trim().length > 200) {
+        text = el.text();
+        break;
+      }
+    }
+
+    // Fallback to body
+    if (!text) text = $("body").text();
+
+    // Collapse whitespace
+    text = text.replace(/[\t ]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    return text.substring(0, maxChars);
+  } catch {
+    return "";
+  }
+}
+
+interface SearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+  pageContent?: string;
+}
+
+/**
+ * Perform a web search via DuckDuckGo HTML endpoint and optionally
+ * enrich the top results by fetching actual page content.
+ */
+async function performWebSearch(query: string): Promise<SearchResult[]> {
+  const searchRes = await fetch(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    { headers: { "User-Agent": SEARCH_USER_AGENT } }
+  );
+
+  if (!searchRes.ok) {
+    throw new Error(`DuckDuckGo returned HTTP ${searchRes.status}`);
+  }
+
+  const html = await searchRes.text();
+  const $ = cheerio.load(html);
+
+  const results: SearchResult[] = [];
+
+  $(".result").each((i, el) => {
+    if (i >= 6) return false; // top 6 links
+
+    const title = $(el).find(".result__title").text().trim();
+    const snippet = $(el).find(".result__snippet").text().trim();
+    let url =
+      $(el).find(".result__a").attr("href") ||
+      $(el).find(".result__url").attr("href") ||
+      "";
+
+    // Extract actual URL from DDG redirect wrapper
+    if (url.includes("uddg=")) {
+      const match = url.match(/uddg=([^&]+)/);
+      if (match) url = decodeURIComponent(match[1]);
+    }
+
+    // Normalise URL scheme
+    if (url && !url.startsWith("http")) {
+      url = "https://" + url.replace(/^\/\//, "");
+    }
+
+    if (title && snippet && url.startsWith("http")) {
+      results.push({ title, snippet, url });
+    }
+  });
+
+  if (results.length === 0) {
+    throw new Error(
+      "No search results found — DuckDuckGo may have blocked the request."
+    );
+  }
+
+  // Fetch actual page content for the top 3 results in parallel
+  // Each fetch is isolated so one failure doesn't affect the others
+  await Promise.allSettled(
+    results.slice(0, 3).map(async (r) => {
+      r.pageContent = await fetchPageContent(r.url);
+    })
+  );
+
+  return results;
+}
+
+/**
+ * Build a system prompt section from the search results.
+ */
+function buildSearchContext(query: string, results: SearchResult[]): string {
+  const entries = results
+    .map((r, i) => {
+      let entry = `[${i + 1}] "${r.title}"\n    URL: ${r.url}\n    Snippet: ${r.snippet}`;
+      if (r.pageContent && r.pageContent.length > 100) {
+        entry += `\n    Page Content:\n    ${r.pageContent}`;
+      }
+      return entry;
+    })
+    .join("\n\n");
+
+  return `You have access to real-time web search results. The user asked: "${query}"
+
+Here are the live search results (searched just now):
+
+${entries}
+
+INSTRUCTIONS:
+1. Provide a thorough, accurate, and up-to-date answer using these search results.
+2. When page content is available, prefer it over short snippets — it is more detailed.
+3. ALWAYS cite your sources inline using markdown links: [Source Title](URL).
+4. Synthesize information from multiple sources when possible for a well-rounded answer.
+5. If the search results don't fully cover the topic, supplement with your own knowledge but clearly note which parts come from search results vs your training data.
+6. Structure your answer clearly with headings, lists, or other formatting as appropriate.`;
+}
+
+// ---------------------------------------------------------------------------
+// Chat Route
+// ---------------------------------------------------------------------------
 
 export async function POST(req: Request) {
   try {
@@ -18,105 +196,70 @@ export async function POST(req: Request) {
     const openai = new OpenAI({
       baseURL: NVIDIA_BASE_URL,
       apiKey,
+      timeout: 120000, // 2 min timeout — NIM models can be slow on cold start
+      maxRetries: 0,  // We handle retries ourselves
     });
 
-    // Parse messages to handle vision images
+    // Parse messages — only keep role + content to avoid sending
+    // client-side fields (id, createdAt, data, etc.) that the API rejects
     const formattedMessages = messages.map((msg: any) => {
-      // Check if there's an attached image (sent via data object from frontend)
-      if (msg.role === 'user' && msg.data && msg.data.imageUrl) {
+      // Vision: attach image alongside text
+      if (msg.role === "user" && msg.data?.imageUrl) {
         return {
           role: msg.role,
           content: [
             { type: "text", text: msg.content },
-            { type: "image_url", image_url: { url: msg.data.imageUrl } }
-          ]
+            { type: "image_url", image_url: { url: msg.data.imageUrl } },
+          ],
         };
       }
-      
-      // Clean up internal properties that OpenAI API doesn't accept
-      const { data, id, ...cleanMsg } = msg;
-      return cleanMsg;
+
+      // Only keep what the NVIDIA API expects
+      return { role: msg.role, content: msg.content };
     });
 
+    // ------ Web Search Augmentation ------
     if (webSearchEnabled) {
-      const lastUserMsg = [...formattedMessages].reverse().find(m => m.role === 'user');
+      const lastUserMsg = [...formattedMessages]
+        .reverse()
+        .find((m: any) => m.role === "user");
+
       if (lastUserMsg) {
         let query = "";
-        if (typeof lastUserMsg.content === 'string') {
+        if (typeof lastUserMsg.content === "string") {
           query = lastUserMsg.content;
         } else if (Array.isArray(lastUserMsg.content)) {
-          const textPart = lastUserMsg.content.find((c: any) => c.type === 'text');
+          const textPart = lastUserMsg.content.find(
+            (c: any) => c.type === "text"
+          );
           if (textPart) query = textPart.text;
         }
 
         if (query.trim().length > 0) {
           try {
-            // Use custom scraper to bypass bot protection on official DDG API
-            const searchRes = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-              }
-            });
-            const html = await searchRes.text();
-            const $ = cheerio.load(html);
-            
-            const results: any[] = [];
-            $('.result').each((i, el) => {
-              if (i >= 5) return; // limit to top 5
-              const title = $(el).find('.result__title').text().trim();
-              const snippet = $(el).find('.result__snippet').text().trim();
-              let url = $(el).find('.result__url').attr('href') || $(el).find('.result__a').attr('href') || "";
-              
-              if (url.includes('uddg=')) {
-                const match = url.match(/uddg=([^&]+)/);
-                if (match) url = decodeURIComponent(match[1]);
-              }
-              
-              if (title && snippet) {
-                results.push({ title, snippet, url });
-              }
-            });
+            const searchResults = await performWebSearch(query);
+            const searchPrompt = buildSearchContext(query, searchResults);
 
-            if (results.length === 0) {
-               throw new Error("No results found or search blocked.");
-            }
-            
-            const contextText = results.map((r, i) => `[${i + 1}] Title: ${r.title}\nURL: ${r.url}\nSnippet: ${r.snippet}`).join('\n\n');
-            
-            const systemSearchPrompt = `You are an AI assistant equipped with real-time web search capabilities.
-The user asked: "${query}"
-
-To help you answer, a live web search was performed. Here are the top results:
-
-${contextText}
-
-INSTRUCTIONS:
-1. Formulate a highly accurate and helpful answer based ONLY on these search results.
-2. IMPORTANT: You MUST actively cite your sources inline using the URLs provided. Format citations as [Title](URL).
-3. If the search results do not contain the exact answer, rely on your internal knowledge but explicitly mention that the live search did not find specific details.`;
-
-            // Prepend or replace system message
-            if (formattedMessages[0]?.role === 'system') {
-              formattedMessages[0].content = formattedMessages[0].content + "\n\n" + systemSearchPrompt;
+            // Inject into existing system message or prepend a new one
+            if (formattedMessages[0]?.role === "system") {
+              formattedMessages[0].content += "\n\n" + searchPrompt;
             } else {
               formattedMessages.unshift({
-                role: 'system',
-                content: systemSearchPrompt
+                role: "system",
+                content: searchPrompt,
               });
             }
           } catch (searchError: any) {
             console.error("Web Search Error:", searchError);
-            const errorPrompt = `The user enabled Web Search for the query: "${query}", but the live web search failed (Error: ${searchError.message || searchError}). 
-INSTRUCTIONS:
-1. Politely inform the user that the live web search was blocked or failed.
-2. Answer their question to the best of your ability using your internal knowledge.`;
 
-            if (formattedMessages[0]?.role === 'system') {
-              formattedMessages[0].content = formattedMessages[0].content + "\n\n" + errorPrompt;
+            const fallbackPrompt = `The user enabled Web Search for: "${query}", but the live search failed (${searchError.message || "unknown error"}). Please answer using your internal knowledge and let the user know that live web search was unavailable this time.`;
+
+            if (formattedMessages[0]?.role === "system") {
+              formattedMessages[0].content += "\n\n" + fallbackPrompt;
             } else {
               formattedMessages.unshift({
-                role: 'system',
-                content: errorPrompt
+                role: "system",
+                content: fallbackPrompt,
               });
             }
           }
@@ -124,27 +267,72 @@ INSTRUCTIONS:
       }
     }
 
-    // Start stream using native OpenAI library
+    // ------ Stream the response ------
+    const selectedModel = model || "meta/llama-3.1-70b-instruct";
+    const modelConfig = getModelConfig(selectedModel);
+
     const payload: any = {
-      model: model || "meta/llama-3.1-70b-instruct",
+      model: selectedModel,
       messages: formattedMessages,
       temperature: temperature ?? 0.7,
+      max_tokens: modelConfig?.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
     };
 
-    const response = await openai.chat.completions.create(payload);
+    console.log(
+      `[Chat] Model: ${selectedModel} | max_tokens: ${payload.max_tokens} | messages: ${formattedMessages.length}`
+    );
 
-    // Convert response to AI stream
+    let response;
+    try {
+      response = await openai.chat.completions.create(payload);
+    } catch (apiError: any) {
+      console.error(
+        `NVIDIA API Error [${selectedModel}]:`,
+        apiError.status,
+        apiError.message
+      );
+
+      // If the model rejected max_tokens (400/422), retry without it
+      if (apiError.status === 400 || apiError.status === 422) {
+        console.warn("Retrying without max_tokens...");
+        delete payload.max_tokens;
+        try {
+          response = await openai.chat.completions.create(payload);
+        } catch (retryError: any) {
+          console.error("Retry also failed:", retryError.message);
+          return new Response(
+            JSON.stringify({
+              error: `Model "${selectedModel}" error: ${retryError.message}`,
+            }),
+            { status: 502, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      } else {
+        return new Response(
+          JSON.stringify({
+            error: `NVIDIA API error (${apiError.status || "unknown"}): ${apiError.message}`,
+          }),
+          {
+            status: apiError.status || 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    }
+
+    // Convert OpenAI response to AI SDK stream
     const stream = OpenAIStream(response as any);
-    
-    // Return standard text stream
-    return new StreamingTextResponse(stream);
 
+    return new StreamingTextResponse(stream);
   } catch (error) {
     console.error("Chat API Error:", error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(
+      JSON.stringify({ error: (error as Error).message }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 }

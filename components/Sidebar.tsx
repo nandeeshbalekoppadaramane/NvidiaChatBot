@@ -6,6 +6,8 @@ interface Model {
   name: string;
   owned_by: string;
   category?: string;
+  description?: string;
+  maxTokens?: number;
 }
 
 interface ChatSession {
@@ -182,9 +184,18 @@ export function Sidebar({
             </div>
 
             {selectedModelObj && (
-              <div className="bg-[#111] border border-white/10 rounded-lg p-3 flex flex-col gap-1">
+              <div className="bg-[#111] border border-white/10 rounded-lg p-3 flex flex-col gap-1.5">
                 <span className="text-xs font-semibold text-[#76B900]">Selected</span>
                 <span className="text-xs text-white">{selectedModelObj.name}</span>
+                {selectedModelObj.description && (
+                  <span className="text-[10px] text-gray-500 leading-relaxed">{selectedModelObj.description}</span>
+                )}
+                <div className="flex items-center gap-3 text-[10px] pt-0.5">
+                  {selectedModelObj.maxTokens && (
+                    <span className="text-gray-500">Tokens: <span className="text-gray-300 font-mono">{selectedModelObj.maxTokens}</span></span>
+                  )}
+                  <span className="text-gray-500">Type: <span className="text-gray-300 capitalize">{selectedModelObj.category || 'chat'}</span></span>
+                </div>
               </div>
             )}
           </div>

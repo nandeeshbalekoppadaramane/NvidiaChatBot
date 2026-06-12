@@ -74,7 +74,7 @@ export function ChatInterface({
   const recognitionRef = useRef<any>(null);
   const startInputRef = useRef("");
 
-  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append, error } = useChat({
     api: "/api/chat",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -340,6 +340,18 @@ export function ChatInterface({
           </div>
         )}
         <div ref={messagesEndRef} />
+
+        {/* Error display */}
+        {error && !isLoading && (
+          <div className="flex justify-start w-full">
+            <div className="max-w-[85%] md:max-w-[75%] rounded-2xl p-4 bg-red-500/10 border border-red-500/30 text-red-300 rounded-bl-sm">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-xs font-bold text-red-400">⚠ Error</span>
+              </div>
+              <p className="text-sm">{error.message || "Something went wrong. Please try again."}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="p-4 md:p-6 shrink-0">
