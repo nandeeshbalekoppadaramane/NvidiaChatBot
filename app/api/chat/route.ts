@@ -133,45 +133,7 @@ async function searxngSearch(query: string): Promise<SearchResult[]> {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Brave Search API  (fallback — requires free API key)
-//    Free: 2,000 queries/month — https://brave.com/search/api/
-// ---------------------------------------------------------------------------
-
-async function braveSearch(query: string): Promise<SearchResult[]> {
-  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
-  if (!apiKey) throw new Error("NO_BRAVE_KEY");
-
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=6`;
-
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/json",
-      "Accept-Encoding": "gzip",
-      "X-Subscription-Token": apiKey,
-    },
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Brave Search HTTP ${res.status}: ${body.slice(0, 200)}`);
-  }
-
-  const data = await res.json();
-  const webResults = data.web?.results || [];
-
-  if (webResults.length === 0) {
-    throw new Error("Brave Search returned no results.");
-  }
-
-  return webResults.slice(0, 6).map((r: any) => ({
-    title: r.title || "",
-    snippet: r.description || "",
-    url: r.url || "",
-  }));
-}
-
-// ---------------------------------------------------------------------------
-// 3. DuckDuckGo HTML scraping  (last resort — works locally only)
+// 2. DuckDuckGo HTML scraping  (fallback — works locally only)
 // ---------------------------------------------------------------------------
 
 async function ddgSearch(query: string): Promise<SearchResult[]> {
@@ -221,7 +183,7 @@ async function ddgSearch(query: string): Promise<SearchResult[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Unified search: SearXNG → Brave → DuckDuckGo → enrich top results
+// Unified search: SearXNG → DuckDuckGo fallback → enrich top results
 // ---------------------------------------------------------------------------
 
 async function performWebSearch(query: string): Promise<SearchResult[]> {
@@ -233,27 +195,13 @@ async function performWebSearch(query: string): Promise<SearchResult[]> {
     console.log(`[Search] SearXNG returned ${results.length} results`);
   } catch (err: any) {
     if (err.message === "NO_SEARXNG_URL") {
-      console.log("[Search] No SEARXNG_URL set, trying next backend...");
+      console.log("[Search] No SEARXNG_URL set, falling back to DuckDuckGo...");
     } else {
       console.warn("[Search] SearXNG failed:", err.message);
     }
   }
 
-  // Try Brave Search (needs API key but works on cloud)
-  if (!results) {
-    try {
-      results = await braveSearch(query);
-      console.log(`[Search] Brave returned ${results.length} results`);
-    } catch (err: any) {
-      if (err.message === "NO_BRAVE_KEY") {
-        console.log("[Search] No BRAVE_SEARCH_API_KEY set, trying DuckDuckGo...");
-      } else {
-        console.warn("[Search] Brave failed:", err.message);
-      }
-    }
-  }
-
-  // Last resort: DuckDuckGo scraping (works locally, blocked on cloud)
+  // Fallback: DuckDuckGo scraping (works locally, blocked on cloud)
   if (!results) {
     results = await ddgSearch(query);
     console.log(`[Search] DuckDuckGo returned ${results.length} results`);
