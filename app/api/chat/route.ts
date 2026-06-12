@@ -349,8 +349,8 @@ export async function POST(req: Request) {
     const selectedModel = model || "meta/llama-3.1-70b-instruct";
     const modelConfig = getModelConfig(selectedModel);
 
-    // Enforce safe bounds on temperature to prevent chaotic generation
-    const safeTemp = Math.min(Math.max(temperature ?? 0.7, 0.0), 0.8);
+    // Enforce safe bounds on temperature to prevent chaotic generation (max 1.0)
+    const safeTemp = Math.min(Math.max(temperature ?? 0.7, 0.0), 1.0);
 
     const payload: any = {
       model: selectedModel,

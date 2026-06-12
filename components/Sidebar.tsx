@@ -211,7 +211,7 @@ export function Sidebar({
               </div>
               <input 
                 type="range" 
-                min="0" max="2" step="0.1" 
+                min="0" max="1" step="0.1" 
                 value={temperature}
                 onChange={(e) => setTemperature(parseFloat(e.target.value))}
                 className="w-full accent-[#76B900]"
