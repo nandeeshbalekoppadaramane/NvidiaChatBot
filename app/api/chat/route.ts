@@ -87,11 +87,49 @@ interface SearchResult {
   pageContent?: string;
 }
 
-/**
- * Perform a web search via DuckDuckGo HTML endpoint and optionally
- * enrich the top results by fetching actual page content.
- */
-async function performWebSearch(query: string): Promise<SearchResult[]> {
+// ---------------------------------------------------------------------------
+// Brave Search API  (primary — works on Vercel / cloud)
+// Free tier: 2,000 queries/month — https://brave.com/search/api/
+// ---------------------------------------------------------------------------
+
+async function braveSearch(query: string): Promise<SearchResult[]> {
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!apiKey) throw new Error("NO_BRAVE_KEY");
+
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=6`;
+
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      "Accept-Encoding": "gzip",
+      "X-Subscription-Token": apiKey,
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Brave Search HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const webResults = data.web?.results || [];
+
+  if (webResults.length === 0) {
+    throw new Error("Brave Search returned no results.");
+  }
+
+  return webResults.slice(0, 6).map((r: any) => ({
+    title: r.title || "",
+    snippet: r.description || "",
+    url: r.url || "",
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// DuckDuckGo HTML scraping  (fallback — works locally, blocked on cloud IPs)
+// ---------------------------------------------------------------------------
+
+async function ddgSearch(query: string): Promise<SearchResult[]> {
   const searchRes = await fetch(
     `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
     { headers: { "User-Agent": SEARCH_USER_AGENT } }
@@ -107,7 +145,7 @@ async function performWebSearch(query: string): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
 
   $(".result").each((i, el) => {
-    if (i >= 6) return false; // top 6 links
+    if (i >= 6) return false;
 
     const title = $(el).find(".result__title").text().trim();
     const snippet = $(el).find(".result__snippet").text().trim();
@@ -116,13 +154,11 @@ async function performWebSearch(query: string): Promise<SearchResult[]> {
       $(el).find(".result__url").attr("href") ||
       "";
 
-    // Extract actual URL from DDG redirect wrapper
     if (url.includes("uddg=")) {
       const match = url.match(/uddg=([^&]+)/);
       if (match) url = decodeURIComponent(match[1]);
     }
 
-    // Normalise URL scheme
     if (url && !url.startsWith("http")) {
       url = "https://" + url.replace(/^\/\//, "");
     }
@@ -133,13 +169,33 @@ async function performWebSearch(query: string): Promise<SearchResult[]> {
   });
 
   if (results.length === 0) {
-    throw new Error(
-      "No search results found — DuckDuckGo may have blocked the request."
-    );
+    throw new Error("DuckDuckGo returned no results (likely blocked on this server).");
   }
 
-  // Fetch actual page content for the top 3 results in parallel
-  // Each fetch is isolated so one failure doesn't affect the others
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Unified search: Brave → DuckDuckGo fallback → enrich top results
+// ---------------------------------------------------------------------------
+
+async function performWebSearch(query: string): Promise<SearchResult[]> {
+  let results: SearchResult[];
+
+  try {
+    results = await braveSearch(query);
+    console.log(`[Search] Brave returned ${results.length} results`);
+  } catch (braveErr: any) {
+    if (braveErr.message === "NO_BRAVE_KEY") {
+      console.log("[Search] No BRAVE_SEARCH_API_KEY set, falling back to DuckDuckGo");
+    } else {
+      console.warn("[Search] Brave failed, falling back to DuckDuckGo:", braveErr.message);
+    }
+    results = await ddgSearch(query);
+    console.log(`[Search] DuckDuckGo returned ${results.length} results`);
+  }
+
+  // Enrich top 3 results with actual page content (best-effort)
   await Promise.allSettled(
     results.slice(0, 3).map(async (r) => {
       r.pageContent = await fetchPageContent(r.url);
