@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Square, Menu, Paperclip, X, Mic, Check, Copy, Globe, PanelLeft, Network, RefreshCw, ArrowDown } from "lucide-react";
+import { Send, Square, Menu, Paperclip, X, Mic, Check, Copy, Globe, PanelLeft, Network, RefreshCw, ArrowDown, Download } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -99,6 +99,10 @@ export function ChatInterface({
     navigator.clipboard.writeText(content);
     setCopiedMessageId(id);
     setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
+  const handleExportPDF = () => {
+    window.print();
   };
 
   const { messages, input, handleInputChange, handleSubmit, isLoading, stop, setMessages, append, error, reload } = useChat({
@@ -359,8 +363,8 @@ export function ChatInterface({
   };
 
   return (
-    <main className="flex-1 flex flex-col h-full bg-transparent relative z-10">
-      <header className="h-[64px] flex items-center px-5 glass-panel border-b border-white/5 border-x-0 border-t-0 shrink-0 relative">
+    <main className="flex-1 flex flex-col h-full bg-transparent relative z-10 print:bg-white print:text-black">
+      <header className="h-[64px] flex items-center px-5 glass-panel border-b border-white/5 border-x-0 border-t-0 shrink-0 relative print:hidden">
         <div className="flex items-center gap-4 absolute left-5">
           {!isDesktopSidebarOpen && (
             <button onClick={onToggleDesktopSidebar} className="hidden md:block text-gray-400 hover:text-white transition-colors" title="Open Sidebar">
@@ -385,10 +389,23 @@ export function ChatInterface({
             </span>
           </div>
         </div>
+
+        <div className="flex items-center gap-2 absolute right-5">
+          {messages.length > 0 && (
+            <button 
+              onClick={handleExportPDF}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-medium transition-colors border border-white/10"
+              title="Export Chat to PDF"
+            >
+              <Download size={14} />
+              <span className="hidden sm:inline">Export PDF</span>
+            </button>
+          )}
+        </div>
       </header>
 
       <div 
-        className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-8 w-full relative"
+        className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col gap-8 w-full relative print:overflow-visible print:h-auto print:block"
         onScroll={handleScroll}
       >
         {displayMessages.length === 0 ? (
@@ -437,7 +454,7 @@ export function ChatInterface({
                   )}
 
                   {msg.role === 'assistant' && !isLoading && (
-                    <div className="absolute -bottom-1 left-9 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                    <div className="absolute -bottom-1 left-9 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 print:hidden">
                       <button onClick={() => handleCopyMessage(msg.content, msg.id)} className="flex items-center gap-1.5 p-1 text-xs text-gray-500 hover:text-white bg-transparent hover:bg-white/10 rounded transition-colors" title="Copy Message">
                          {copiedMessageId === msg.id ? <Check size={14} className="text-[#76B900]"/> : <Copy size={14} />}
                       </button>
@@ -488,7 +505,7 @@ export function ChatInterface({
         )}
       </div>
 
-      <div className="p-4 md:p-6 shrink-0 bg-[#1e1e1e]/80 backdrop-blur-md relative">
+      <div className="p-4 md:p-6 shrink-0 bg-[#1e1e1e]/80 backdrop-blur-md relative print:hidden">
         {!autoScroll && messages.length > 0 && (
           <button 
             onClick={() => {

@@ -376,10 +376,10 @@ export async function POST(req: Request) {
             const queryPrompt = `Generate 3 distinct search queries to thoroughly research the following topic from different angles. Topic: "${query}". Return only the 3 queries separated by newlines, with no bullet points, numbers, or quotes.`;
             
             const queryResponse = await openai.chat.completions.create({
-              model: "meta/llama-3.1-8b-instruct",
+              model: model || "meta/llama-3.1-70b-instruct",
               messages: [{ role: "user", content: queryPrompt }],
               temperature: 0.5,
-              max_tokens: 100,
+              max_tokens: 150,
             });
             
             let queries = (queryResponse.choices[0].message.content || query)
@@ -405,7 +405,11 @@ export async function POST(req: Request) {
                return true;
             });
             
-            emitThink(`[Deep Research] Aggregating context from ${allResults.length} sources and synthesizing final report...\n</think>\n\n`);
+            emitThink(`[Deep Research] Aggregating context from ${allResults.slice(0, 6).length} high-quality sources:\n`);
+            allResults.slice(0, 6).forEach((r, i) => {
+              emitThink(`[${i+1}] ${r.title}\n    ${r.url}\n`);
+            });
+            emitThink(`\n[Deep Research] Synthesizing final report...\n</think>\n\n`);
             
             // Build context
             const searchPrompt = buildSearchContext(query, allResults.slice(0, 6)); // Top 6 unique results
@@ -457,7 +461,11 @@ export async function POST(req: Request) {
             }
             
             // Save to DB
-            const finalContent = "<think>\n[Deep Research] Initializing autonomous agent...\n[Deep Research] Generating search strategies...\n[Deep Research] Running parallel searches for:\n- " + queries.join("\n- ") + "\n[Deep Research] Aggregating context from " + allResults.length + " sources and synthesizing final report...\n</think>\n\n" + fullCompletion;
+            let finalContent = "<think>\n[Deep Research] Initializing autonomous agent...\n[Deep Research] Generating search strategies...\n[Deep Research] Running parallel searches for:\n- " + queries.join("\n- ") + "\n[Deep Research] Aggregating context from " + allResults.slice(0, 6).length + " high-quality sources:\n";
+            allResults.slice(0, 6).forEach((r, i) => {
+              finalContent += `[${i+1}] ${r.title}\n    ${r.url}\n`;
+            });
+            finalContent += "\n[Deep Research] Synthesizing final report...\n</think>\n\n" + fullCompletion;
             
             await prisma.message.create({
               data: { chatId: currentChatId, role: "assistant", content: finalContent },
