@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --color-nv-green: #76B900;
@@ -26,7 +27,9 @@
     @apply border-white/5;
   }
   body {
-    @apply bg-[#1e1e1e] text-white antialiased overflow-hidden h-screen w-screen selection:bg-nv-green/30;
+    height: 100vh; /* Fallback for older browsers */
+    height: 100dvh;
+    @apply bg-[#1e1e1e] text-white antialiased overflow-hidden w-screen selection:bg-nv-green/30;
   }
   
   /* Custom Scrollbar */

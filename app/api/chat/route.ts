@@ -259,7 +259,7 @@ export async function POST(req: Request) {
     if (!session?.user) return new Response("Unauthorized", { status: 401 });
     const userId = (session.user as any).id;
 
-    const { messages, model, temperature, webSearchEnabled, deepResearchEnabled, chatId } = await req.json();
+    const { messages, model, temperature, webSearchEnabled, chatId, collectionId } = await req.json();
 
     // Fetch API Key from database
     const settings = await prisma.userSettings.findUnique({ where: { userId } });
@@ -288,12 +288,13 @@ export async function POST(req: Request) {
         title = title.charAt(0).toUpperCase() + title.slice(1);
       }
         
-      const newChat = await prisma.chat.create({
-        data: {
-          title,
-          userId,
-        }
-      });
+        const newChat = await prisma.chat.create({
+          data: {
+            title,
+            userId,
+            collectionId: collectionId || null,
+          }
+        });
       currentChatId = newChat.id;
     }
 
@@ -318,22 +319,49 @@ export async function POST(req: Request) {
     const openai = new OpenAI({
       baseURL: PROVIDER_BASE_URL,
       apiKey,
-      timeout: 120000, // 2 min timeout
+      timeout: 300000, // 5 min timeout to allow massive PDF context processing
       maxRetries: 0,  // We handle retries ourselves
     });
 
     // Parse messages — only keep role + content to avoid sending
     // client-side fields (id, createdAt, data, etc.) that the API rejects
-    const formattedMessages = messages.map((msg: any) => {
-      // Vision: attach image alongside text
-      if (msg.role === "user" && msg.data?.imageUrl) {
+    const formattedMessages = messages.map((msg: any, index: number) => {
+      // Vision: attach multiple images alongside text
+      if (msg.role === "user" && msg.data?.images && Array.isArray(msg.data.images)) {
+        const textContent = (msg.content || "").trim();
+        const contentArr: any[] = [{ 
+          type: "text", 
+          text: textContent.length > 0 ? textContent : "Please analyze the attached images." 
+        }];
+        
+        const imagesToProcess = msg.data.images.slice(0, 10); // API Hardcap to 10 images to prevent 400 Payload Too Large errors
+        imagesToProcess.forEach((imgUrl: string) => {
+          contentArr.push({ type: "image_url", image_url: { url: imgUrl } });
+        });
+        
         return {
           role: msg.role,
-          content: [
-            { type: "text", text: msg.content },
-            { type: "image_url", image_url: { url: msg.data.imageUrl } },
-          ],
+          content: contentArr,
         };
+      }
+
+      if (msg.role === "user" && msg.data?.fileContexts) {
+        const isLastMessage = index === messages.length - 1;
+        // 150k chars for the active turn (~37k tokens), 10k chars for historic turns (~2.5k tokens)
+        const maxTotalChars = isLastMessage ? 150000 : 10000;
+        
+        let fileText = "\n\n--- ATTACHED DOCUMENTS ---\n";
+        let totalFileLength = 0;
+        
+        msg.data.fileContexts.forEach((f: any) => {
+          const allowedLength = Math.max(0, maxTotalChars - totalFileLength);
+          if (allowedLength === 0) return;
+          
+          const safeContent = f.content.length > allowedLength ? f.content.slice(0, allowedLength) + "\n...[CONTENT TRUNCATED FOR LENGTH]" : f.content;
+          totalFileLength += safeContent.length;
+          fileText += `\nDocument Name: ${f.name}\nContent:\n${safeContent}\n---`;
+        });
+        return { role: msg.role, content: msg.content + fileText };
       }
 
       // Only keep what the Provider API expects
@@ -350,145 +378,167 @@ export async function POST(req: Request) {
       formattedMessages.unshift({ role: "system", content: safeguardInstruction });
     }
 
-    // ------ Deep Research Augmentation ------
-    if (deepResearchEnabled) {
-      const lastUserMsg = [...formattedMessages].reverse().find((m: any) => m.role === "user");
-      let query = "the topic";
-      if (lastUserMsg) {
-        if (typeof lastUserMsg.content === "string") {
-          query = lastUserMsg.content;
-        } else if (Array.isArray(lastUserMsg.content)) {
-          const textPart = lastUserMsg.content.find((c: any) => c.type === "text");
-          if (textPart) query = textPart.text;
+    // ------ RAG / Knowledge Base Retrieval ------
+    const targetCollectionId = collectionId || null;
+
+    if (targetCollectionId) {
+      // Find the actual text query to embed
+      const lastMsgWithData = messages.findLast((m: any) => m.role === "user");
+      let queryText = "";
+      if (lastMsgWithData) {
+        if (typeof lastMsgWithData.content === "string") {
+          queryText = lastMsgWithData.content;
+        } else if (Array.isArray(lastMsgWithData.content)) {
+          const textPart = lastMsgWithData.content.find((c: any) => c.type === "text");
+          if (textPart) queryText = textPart.text;
         }
       }
 
-      const stream = new ReadableStream({
-        async start(controller) {
-          const encoder = new TextEncoder();
-          const emitThink = (text: string) => controller.enqueue(encoder.encode(`0:${JSON.stringify(text)}\n`));
-          
+      if (queryText.trim().length > 0) {
+        try {
+          // 1. Check Embedding Cache
+          let queryEmbedding = null;
           try {
-            emitThink("<think>\n[Deep Research] Initializing autonomous agent...\n");
-            
-            // Phase 1: Generate Queries
-            emitThink("[Deep Research] Generating search strategies...\n");
-            const queryPrompt = `Generate 3 distinct search queries to thoroughly research the following topic from different angles. Topic: "${query}". Return only the 3 queries separated by newlines, with no bullet points, numbers, or quotes.`;
-            
-            const queryResponse = await openai.chat.completions.create({
-              model: model || "meta/llama-3.1-70b-instruct",
-              messages: [{ role: "user", content: queryPrompt }],
-              temperature: 0.5,
-              max_tokens: 150,
-            });
-            
-            let queries = (queryResponse.choices[0].message.content || query)
-              .split("\n")
-              .map(q => q.trim().replace(/^[\d\.\-\"\'\s]+/, ''))
-              .filter(Boolean)
-              .slice(0, 3);
-            
-            if (queries.length === 0) queries = [query];
-            
-            emitThink(`[Deep Research] Running parallel searches for:\n- ${queries.join("\n- ")}\n`);
-            
-            // Phase 2: Parallel Searches
-            const searchPromises = queries.map(q => performWebSearch(q).catch(() => []));
-            const resultsArrays = await Promise.all(searchPromises);
-            
-            // Deduplicate
-            let allResults = resultsArrays.flat();
-            const seen = new Set();
-            allResults = allResults.filter(r => {
-               if (seen.has(r.url)) return false;
-               seen.add(r.url);
-               return true;
-            });
-            
-            emitThink(`[Deep Research] Aggregating context from ${allResults.slice(0, 6).length} high-quality sources:\n`);
-            allResults.slice(0, 6).forEach((r, i) => {
-              emitThink(`[${i+1}] ${r.title}\n    ${r.url}\n`);
-            });
-            emitThink(`\n[Deep Research] Synthesizing final report...\n</think>\n\n`);
-            
-            // Build context
-            const searchPrompt = buildSearchContext(query, allResults.slice(0, 6)); // Top 6 unique results
-            
-            if (formattedMessages[0]?.role === "system") {
-              formattedMessages[0].content += "\n\n" + searchPrompt;
-            } else {
-              formattedMessages.unshift({ role: "system", content: searchPrompt });
+            const cachedArr: any[] = await prisma.$queryRaw`
+              SELECT "embedding" FROM "CachedEmbedding" WHERE "query" = ${queryText} LIMIT 1
+            `;
+            if (cachedArr.length > 0 && cachedArr[0].embedding) {
+              console.log("[RAG] Using cached embedding for query.");
+              const embStr = cachedArr[0].embedding;
+              queryEmbedding = typeof embStr === 'string' ? JSON.parse(embStr) : embStr;
             }
-            
-            // Phase 3: Final LLM Generation
-            const safeTemp = Math.min(Math.max(temperature ?? 0.7, 0.0), 1.0);
-            const selectedModel = model || "meta/llama-3.1-70b-instruct";
-            const modelConfig = getModelConfig(selectedModel);
-            
-            const payload: any = {
-              model: selectedModel,
-              messages: formattedMessages,
-              temperature: safeTemp,
-              max_tokens: modelConfig?.maxTokens ?? DEFAULT_MAX_TOKENS,
-              stream: true,
-            };
-            
-            let response;
-            try {
-              response = await openai.chat.completions.create(payload);
-            } catch (apiError: any) {
-              if (apiError.status === 400 || apiError.status === 422 || apiError.status === 503) {
-                emitThink(`[Deep Research] NVIDIA API ${apiError.status} received. Retrying with minimal payload...\n`);
-                delete payload.max_tokens;
-                delete payload.top_p;
-                delete payload.presence_penalty;
-                delete payload.frequency_penalty;
-                response = await openai.chat.completions.create(payload);
-              } else {
-                throw apiError;
+          } catch (e) {
+            console.error("[RAG] Cache lookup failed:", e);
+          }
+
+          if (!queryEmbedding) {
+            console.log(`[RAG] Generating new embedding for collection: ${targetCollectionId}`);
+            // Embed the user's question
+            const embedRes = await fetch('https://integrate.api.nvidia.com/v1/embeddings', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                input: [queryText],
+                model: "nvidia/nv-embedqa-e5-v5",
+                input_type: "query",
+                truncate: "END"
+              })
+            });
+
+            if (!embedRes.ok) throw new Error("Failed to embed query");
+            const embedData = await embedRes.json();
+            queryEmbedding = embedData.data[0].embedding;
+
+            // Save to Cache (fire and forget)
+            prisma.$executeRaw`
+              INSERT INTO "CachedEmbedding" ("id", "query", "embedding", "createdAt")
+              VALUES (gen_random_uuid()::text, ${queryText}, ${JSON.stringify(queryEmbedding)}::vector, NOW())
+              ON CONFLICT ("query") DO NOTHING
+            `.catch(e => console.error("[RAG] Failed to cache embedding:", e));
+          }
+
+          if (queryEmbedding) {
+
+            // 2. Perform Hybrid Search (Cosine Similarity + BM25 Full-Text Search)
+            const rawChunks: any[] = await prisma.$queryRaw`
+              SELECT "content", "documentName", "chunkIndex",
+                     (0.7 * (1 - ("embedding" <=> ${JSON.stringify(queryEmbedding)}::vector)) + 
+                      0.3 * ts_rank(to_tsvector('english', "content"), plainto_tsquery('english', ${queryText})))
+                     AS score
+              FROM "DocumentChunk"
+              WHERE "collectionId" = ${targetCollectionId}
+              ORDER BY score DESC
+              LIMIT 15;
+            `;
+
+            let finalChunks = rawChunks.slice(0, 5);
+
+            if (rawChunks.length > 0) {
+              try {
+                console.log(`[RAG] Re-ranking ${rawChunks.length} chunks...`);
+                const rerankResponse = await fetch('https://integrate.api.nvidia.com/v1/reranking', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    model: "nvidia/nv-rerankqa-mistral-4b-v3",
+                    query: queryText,
+                    documents: rawChunks.map(c => c.content),
+                    top_n: 5
+                  })
+                });
+
+                if (rerankResponse.ok) {
+                  const reranked = await rerankResponse.json();
+                  if (reranked.results && Array.isArray(reranked.results)) {
+                    finalChunks = reranked.results.map((r: any) => rawChunks[r.index]);
+                  }
+                } else {
+                  console.error("[RAG] Reranking failed:", await rerankResponse.text());
+                }
+              } catch (e) {
+                console.error("[RAG] Reranking error:", e);
               }
             }
-            
-            const aiStream = OpenAIStream(response as any);
-            const reader = aiStream.getReader();
-            
-            let fullCompletion = "";
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              controller.enqueue(value);
-              fullCompletion += new TextDecoder().decode(value);
+
+            if (finalChunks.length > 0) {
+              // 3. Fetch Parent Documents (surrounding chunks) for Context Injection
+              console.log("[RAG] Expanding chunks into Parent Documents...");
+              const expandedContexts = await Promise.all(
+                finalChunks.map(async (chunk, i) => {
+                  if (chunk.chunkIndex === undefined || chunk.chunkIndex === null) {
+                     return `[Source ${i+1}: ${chunk.documentName}]\n${chunk.content}`;
+                  }
+                  
+                  const startIdx = Math.max(0, chunk.chunkIndex - 2);
+                  const endIdx = chunk.chunkIndex + 2;
+                  
+                  // Fetch surrounding chunks
+                  const parentChunks: any[] = await prisma.$queryRaw`
+                    SELECT "content" 
+                    FROM "DocumentChunk"
+                    WHERE "documentName" = ${chunk.documentName}
+                      AND "collectionId" = ${targetCollectionId}
+                      AND "chunkIndex" >= ${startIdx}
+                      AND "chunkIndex" <= ${endIdx}
+                    ORDER BY "chunkIndex" ASC
+                    LIMIT 15
+                  `;
+                  
+                  if (parentChunks && parentChunks.length > 0) {
+                    return `[Source ${i+1}: ${chunk.documentName}]\n${parentChunks.map(c => c.content).join("\n...\n")}`;
+                  }
+                  return `[Source ${i+1}: ${chunk.documentName}]\n${chunk.content}`;
+                })
+              );
+              
+              let ragContext = expandedContexts.join("\n\n");
+              
+              // Extreme Safety Net: If the PDF was parsed poorly and created a massive 100k+ chunk, truncate it
+              if (ragContext.length > 80000) {
+                console.warn(`[RAG] Warning: RAG Context is unusually large (${ragContext.length} chars). Truncating to 80,000 characters.`);
+                ragContext = ragContext.slice(0, 80000) + "\n\n...[ADDITIONAL CONTEXT TRUNCATED FOR SAFETY]";
+              }
+              
+              const ragInstruction = `You are a highly intelligent tutor and assistant. You have been provided with excerpts from the user's personal Knowledge Base.\n\nKNOWLEDGE BASE CONTEXT:\n${ragContext}\n\nINSTRUCTIONS:\n1. Answer the user's question accurately using the information provided in the Context above.\n2. Do NOT use outside knowledge unless the context lacks the answer.\n3. Answer naturally and fluently in your own words. You DO NOT need to constantly append [Source: Filename] to every sentence. Only mention the source document name if it's necessary to distinguish between multiple documents or if the user explicitly asks for the source. Keep your tone helpful, conversational, and natural.`;
+
+              if (formattedMessages[0]?.role === "system") {
+                formattedMessages[0].content += `\n\n${ragInstruction}`;
+              } else {
+                formattedMessages.unshift({ role: "system", content: ragInstruction });
+              }
+              console.log(`[RAG] Successfully injected expanded context for ${finalChunks.length} chunks.`);
             }
-            
-            // Save to DB
-            let finalContent = "<think>\n[Deep Research] Initializing autonomous agent...\n[Deep Research] Generating search strategies...\n[Deep Research] Running parallel searches for:\n- " + queries.join("\n- ") + "\n[Deep Research] Aggregating context from " + allResults.slice(0, 6).length + " high-quality sources:\n";
-            allResults.slice(0, 6).forEach((r, i) => {
-              finalContent += `[${i+1}] ${r.title}\n    ${r.url}\n`;
-            });
-            finalContent += "\n[Deep Research] Synthesizing final report...\n</think>\n\n" + fullCompletion;
-            
-            await prisma.message.create({
-              data: { chatId: currentChatId, role: "assistant", content: finalContent },
-            });
-            await prisma.chat.update({
-              where: { id: currentChatId },
-              data: { updatedAt: new Date() }
-            });
-            
-          } catch (e: any) {
-            emitThink(`\n**Deep Research Error**: ${e.message}\n</think>\n\nSorry, the deep research agent encountered an error: ${e.message}`);
-          } finally {
-            controller.close();
           }
+        } catch (e) {
+          console.error("[RAG] Retrieval failed:", e);
         }
-      });
-      
-      return new Response(stream, {
-        headers: {
-          "x-chat-id": currentChatId!,
-          "Content-Type": "text/plain; charset=utf-8"
-        }
-      });
+      }
     }
 
     // ------ Web Search Augmentation ------
@@ -508,7 +558,61 @@ export async function POST(req: Request) {
           if (textPart) query = textPart.text;
         }
 
-        if (query.trim().length > 0) {
+        // --- AI Intent Classifier (LLaMA 3.1 8B) ---
+        const evaluateSearchIntent = async (q: string): Promise<boolean> => {
+          // Fast-path bypass for tiny small-talk to save the API call
+          const cleanQuery = q.trim().toLowerCase().replace(/[^\w\s]/g, "");
+          const smallTalk = ["hi", "hello", "hey", "thanks", "thank you", "bye", "goodbye", "good morning", "how are you", "ok", "okay", "cool", "awesome", "yes", "no"];
+          if (smallTalk.includes(cleanQuery)) return false;
+
+          // Explicit user command override: If they explicitly ask to search, force TRUE immediately
+          const explicitSearchCommands = ["search the web", "search for", "google", "look up", "find online", "search internet"];
+          if (explicitSearchCommands.some(cmd => cleanQuery.includes(cmd))) return true;
+
+          try {
+            // Ask a lightning-fast 8B model to classify the intent
+            const intentRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model: "meta/llama-3.1-8b-instruct",
+                messages: [
+                  {
+                    role: "system",
+                    content: "You are a web search routing engine. Does the user's query require querying a search engine for real-time data, current events, facts, or external knowledge? Reply ONLY with the exact word TRUE or FALSE. Do not write any other text.",
+                  },
+                  { role: "user", content: q },
+                ],
+                max_tokens: 5,
+                temperature: 0.0,
+              }),
+            });
+
+            if (intentRes.ok) {
+              const data = await intentRes.json();
+              const answer = data.choices[0]?.message?.content?.trim().toUpperCase() || "";
+              console.log(`[Intent] LLaMA 8B evaluated "${q}" -> ${answer}`);
+              return answer.includes("TRUE");
+            }
+          } catch (e) {
+            console.warn("[Intent] LLM Classifier failed, falling back to heuristic", e);
+          }
+          
+          // Fallback if the API ping fails
+          const words = cleanQuery.split(/\s+/);
+          if (words.length <= 2) {
+            const searchWords = ["search", "find", "who", "what", "where", "when", "why", "price", "stock", "news", "weather"];
+            return searchWords.some(w => cleanQuery.includes(w));
+          }
+          return true;
+        };
+
+        const shouldSearch = await evaluateSearchIntent(query);
+
+        if (query.trim().length > 0 && shouldSearch) {
           try {
             const searchResults = await performWebSearch(query);
             const searchPrompt = buildSearchContext(query, searchResults);
@@ -540,6 +644,43 @@ export async function POST(req: Request) {
       }
     }
 
+    // --- Context Length Safeguard ---
+    // Enforce a hard cap on the total characters sent to the API (~300k chars = ~75k tokens)
+    // This prevents 400 Context Exceeded errors for long chats with massive historical messages.
+    const MAX_TOTAL_CHARS = 300000;
+    let currentTotalChars = 0;
+    
+    // Always keep the system message (which contains RAG context & Safeguards)
+    let systemMsg = formattedMessages.length > 0 && formattedMessages[0].role === "system" ? formattedMessages.shift() : null;
+    if (systemMsg && typeof systemMsg.content === "string") {
+      currentTotalChars += systemMsg.content.length;
+    }
+
+    const prunedMessages = [];
+    // Iterate from newest to oldest
+    for (let i = formattedMessages.length - 1; i >= 0; i--) {
+      const msg = formattedMessages[i];
+      let msgLength = 0;
+      if (typeof msg.content === "string") {
+        msgLength = msg.content.length;
+      } else if (Array.isArray(msg.content)) {
+        msgLength = JSON.stringify(msg.content).length;
+      }
+      
+      if (currentTotalChars + msgLength > MAX_TOTAL_CHARS && prunedMessages.length > 0) {
+        // Stop adding older messages once we hit the safe limit
+        console.warn(`[Chat] Truncating chat history at ${currentTotalChars} chars to prevent 400 error.`);
+        break;
+      }
+      
+      currentTotalChars += msgLength;
+      prunedMessages.unshift(msg);
+    }
+
+    if (systemMsg) {
+      prunedMessages.unshift(systemMsg);
+    }
+
     // ------ Stream the response ------
     const selectedModel = model || "meta/llama-3.1-70b-instruct";
     const modelConfig = getModelConfig(selectedModel);
@@ -549,7 +690,7 @@ export async function POST(req: Request) {
 
     const payload: any = {
       model: selectedModel,
-      messages: formattedMessages,
+      messages: prunedMessages,
       temperature: safeTemp,
       max_tokens: modelConfig?.maxTokens ?? DEFAULT_MAX_TOKENS,
       top_p: 0.9,             // Cuts off the lowest 10% of probability (prevents gibberish)
@@ -559,7 +700,7 @@ export async function POST(req: Request) {
     };
 
     console.log(
-      `[Chat] Model: ${selectedModel} | max_tokens: ${payload.max_tokens} | messages: ${formattedMessages.length}`
+      `[Chat] Model: ${selectedModel} | max_tokens: ${payload.max_tokens} | messages: ${prunedMessages.length}`
     );
 
     let response;
@@ -607,19 +748,24 @@ export async function POST(req: Request) {
     // Convert OpenAI response to AI SDK stream
     const stream = OpenAIStream(response as any, {
       async onCompletion(completion) {
-        // Save the AI's response to the database once the stream finishes
-        await prisma.message.create({
-          data: {
-            chatId: currentChatId,
-            role: "assistant",
-            content: completion,
-          },
-        });
-        // Bump chat updatedAt to push it to the top
-        await prisma.chat.update({
-          where: { id: currentChatId },
-          data: { updatedAt: new Date() }
-        });
+        try {
+          // Save the AI's response to the database once the stream finishes
+          await prisma.message.create({
+            data: {
+              chatId: currentChatId,
+              role: "assistant",
+              content: completion,
+              model: selectedModel,
+            },
+          });
+          // Bump chat updatedAt to push it to the top
+          await prisma.chat.update({
+            where: { id: currentChatId },
+            data: { updatedAt: new Date() }
+          });
+        } catch (dbError) {
+          console.error("Failed to save message to DB:", dbError);
+        }
       },
     });
 
@@ -639,3 +785,4 @@ export async function POST(req: Request) {
     );
   }
 }
+

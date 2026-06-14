@@ -12,6 +12,7 @@ export default function Home() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [isLoadingKey, setIsLoadingKey] = useState(true);
   const [models, setModels] = useState<any[]>([]);
+  const [collections, setCollections] = useState<any[]>([]);
   
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -21,7 +22,7 @@ export default function Home() {
   const [temperature, setTemperature] = useState(0.7);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   
   // Chat state
   const [chatHistory, setChatHistory] = useState<any[]>([]);
@@ -50,8 +51,8 @@ export default function Home() {
     const savedWebSearch = localStorage.getItem("synapse_web_search");
     if (savedWebSearch) setWebSearchEnabled(savedWebSearch === "true");
 
-    const savedDeepResearch = localStorage.getItem("synapse_deep_research");
-    if (savedDeepResearch) setDeepResearchEnabled(savedDeepResearch === "true");
+    const savedCollection = localStorage.getItem("synapse_collection");
+    if (savedCollection) setSelectedCollection(savedCollection);
   }, []);
 
   // Fetch API Key & Chat History from database when authenticated
@@ -70,10 +71,19 @@ export default function Home() {
         if (res.ok) {
           const data = await res.json();
           setChatHistory(data);
-          // We no longer auto-select the first chat; defaulting to New Chat
         }
       };
+      
+      const loadCollections = async () => {
+        const res = await fetch("/api/collections");
+        if (res.ok) {
+          const data = await res.json();
+          setCollections(data);
+        }
+      };
+
       loadChats();
+      loadCollections();
     }
   }, [status]);
 
@@ -91,8 +101,11 @@ export default function Home() {
   }, [webSearchEnabled, isMounted]);
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem("synapse_deep_research", deepResearchEnabled.toString());
-  }, [deepResearchEnabled, isMounted]);
+    if (isMounted) {
+      if (selectedCollection) localStorage.setItem("synapse_collection", selectedCollection);
+      else localStorage.removeItem("synapse_collection");
+    }
+  }, [selectedCollection, isMounted]);
 
   // Fetch models when API key is set
   useEffect(() => {
@@ -133,13 +146,25 @@ export default function Home() {
     setApiKey(null);
   };
 
-  const handleNewChat = () => {
+  const handleNewNormalChat = () => {
     setCurrentChatId(null);
+    setSelectedCollection(null);
+    setChatSessionKey(Date.now().toString());
+    setIsMobileSidebarOpen(false);
+  };
+
+  const handleNewKnowledgeChat = (collectionId: string) => {
+    setCurrentChatId(null);
+    setSelectedCollection(collectionId);
     setChatSessionKey(Date.now().toString());
     setIsMobileSidebarOpen(false);
   };
 
   const handleSelectChat = (id: string) => {
+    const chat = chatHistory.find(c => c.id === id);
+    if (chat) {
+      setSelectedCollection(chat.collectionId || null);
+    }
     setCurrentChatId(id);
     setChatSessionKey(id);
     setIsMobileSidebarOpen(false);
@@ -197,13 +222,14 @@ export default function Home() {
   const initialMessages = currentChat?.messages || [];
 
   return (
-    <div className="flex h-screen w-full overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden" style={{ height: '100dvh' }}>
       <Sidebar 
         isMobileOpen={isMobileSidebarOpen}
         isDesktopOpen={isDesktopSidebarOpen}
         onMobileClose={() => setIsMobileSidebarOpen(false)}
         onDesktopToggle={() => setIsDesktopSidebarOpen(!isDesktopSidebarOpen)}
         models={models}
+        collections={collections}
         selectedModel={selectedModel}
         setSelectedModel={setSelectedModel}
         temperature={temperature}
@@ -212,12 +238,11 @@ export default function Home() {
         setSystemPrompt={setSystemPrompt}
         webSearchEnabled={webSearchEnabled}
         setWebSearchEnabled={setWebSearchEnabled}
-        deepResearchEnabled={deepResearchEnabled}
-        setDeepResearchEnabled={setDeepResearchEnabled}
         chatHistory={chatHistory}
         currentChatId={currentChatId}
         onSelectChat={handleSelectChat}
-        onNewChat={handleNewChat}
+        onNewNormalChat={handleNewNormalChat}
+        onNewKnowledgeChat={handleNewKnowledgeChat}
         onDeleteChat={handleDeleteChat}
         onRenameChat={handleRenameChat}
         onLogout={handleLogout}
@@ -236,10 +261,10 @@ export default function Home() {
         temperature={temperature}
         apiKey={apiKey}
         webSearchEnabled={webSearchEnabled}
-        deepResearchEnabled={deepResearchEnabled}
+        selectedCollection={selectedCollection}
+        selectedCollectionName={collections.find(c => c.id === selectedCollection)?.name}
         onChatCreated={(newId) => {
           setCurrentChatId(newId);
-          // Instantly refresh from DB to get the smart title Claude-style
           fetchChats();
         }}
         onChatUpdated={fetchChats}

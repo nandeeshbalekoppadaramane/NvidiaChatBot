@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { X, Plus, Search, Settings2, Download, LogOut, MessageSquare, Trash2, UserCircle, PanelLeftClose, ChevronDown, ChevronRight, SlidersHorizontal, Pencil, Network } from "lucide-react";
+import { X, Plus, Search, Settings2, Download, LogOut, MessageSquare, Trash2, UserCircle, PanelLeftClose, ChevronDown, ChevronRight, SlidersHorizontal, Pencil, Network, Library, Book } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { LibraryModal } from "./LibraryModal";
 
 interface Model {
   id: string;
@@ -16,6 +17,7 @@ interface ChatSession {
   title: string;
   messages: any[];
   updatedAt: number;
+  collectionId?: string | null;
 }
 
 interface SidebarProps {
@@ -34,13 +36,13 @@ interface SidebarProps {
   currentChatId: string | null;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (val: boolean) => void;
-  deepResearchEnabled: boolean;
-  setDeepResearchEnabled: (val: boolean) => void;
   onSelectChat: (id: string) => void;
-  onNewChat: () => void;
+  onNewNormalChat: () => void;
+  onNewKnowledgeChat: (collectionId: string) => void;
   onDeleteChat: (id: string) => void;
   onRenameChat: (id: string, newTitle: string) => void;
   onLogout: () => void;
+  collections?: any[];
 }
 
 export function Sidebar({
@@ -59,23 +61,24 @@ export function Sidebar({
   currentChatId,
   webSearchEnabled,
   setWebSearchEnabled,
-  deepResearchEnabled,
-  setDeepResearchEnabled,
   onSelectChat,
-  onNewChat,
+  onNewNormalChat,
+  onNewKnowledgeChat,
   onDeleteChat,
   onRenameChat,
   onLogout,
+  collections = [],
 }: SidebarProps) {
   const [modelSearch, setModelSearch] = useState("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isCollectionPickerOpen, setIsCollectionPickerOpen] = useState(false);
   
   // Local settings state for modal
   const [localModel, setLocalModel] = useState(selectedModel);
   const [localTemp, setLocalTemp] = useState(temperature);
   const [localPrompt, setLocalPrompt] = useState(systemPrompt);
   const [localSearch, setLocalSearch] = useState(webSearchEnabled);
-  const [localDeepResearch, setLocalDeepResearch] = useState(deepResearchEnabled);
 
   useEffect(() => {
     if (isSettingsOpen) {
@@ -83,16 +86,14 @@ export function Sidebar({
       setLocalTemp(temperature);
       setLocalPrompt(systemPrompt);
       setLocalSearch(webSearchEnabled);
-      setLocalDeepResearch(deepResearchEnabled);
     }
-  }, [isSettingsOpen, selectedModel, temperature, systemPrompt, webSearchEnabled, deepResearchEnabled]);
+  }, [isSettingsOpen, selectedModel, temperature, systemPrompt, webSearchEnabled]);
 
   const handleSaveSettings = () => {
     setSelectedModel(localModel);
     setTemperature(localTemp);
     setSystemPrompt(localPrompt);
     setWebSearchEnabled(localSearch);
-    setDeepResearchEnabled(localDeepResearch);
     setIsSettingsOpen(false);
   };
   
@@ -105,28 +106,15 @@ export function Sidebar({
 
   const groupedHistory = useMemo(() => {
     const groups: Record<string, ChatSession[]> = {
-      "Today": [],
-      "Previous 7 Days": [],
-      "Previous 30 Days": [],
-      "Older": []
+      "Knowledge Base Chats": [],
+      "Standard Chats": []
     };
-
-    const now = new Date();
     
     chatHistory.forEach(chat => {
-      // Assuming updatedAt is available. If not, fallback to Date.now()
-      const date = new Date(chat.updatedAt || Date.now());
-      const diffTime = now.getTime() - date.getTime();
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 0 && now.getDate() === date.getDate()) {
-        groups["Today"].push(chat);
-      } else if (diffDays <= 7) {
-        groups["Previous 7 Days"].push(chat);
-      } else if (diffDays <= 30) {
-        groups["Previous 30 Days"].push(chat);
+      if (chat.collectionId) {
+        groups["Knowledge Base Chats"].push(chat);
       } else {
-        groups["Older"].push(chat);
+        groups["Standard Chats"].push(chat);
       }
     });
 
@@ -237,23 +225,13 @@ export function Sidebar({
                   />
                 </div>
 
-                <div className="flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors mt-2" onClick={() => { setLocalSearch(!localSearch); if (!localSearch) setLocalDeepResearch(false); }}>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors mt-2" onClick={() => setLocalSearch(!localSearch)}>
                   <div className="flex flex-col">
                     <span className="text-sm font-medium text-gray-200">Web Search</span>
                     <span className="text-xs text-gray-500 mt-0.5">Augment AI with live data</span>
                   </div>
                   <div className={`w-10 h-5 rounded-full flex items-center p-0.5 transition-colors ${localSearch ? 'bg-[#76B900]' : 'bg-gray-700'}`}>
                     <div className={`w-4 h-4 rounded-full bg-white transition-transform ${localSearch ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </div>
-                </div>
-                
-                <div className={`flex items-center justify-between p-3 rounded-lg bg-[#111] border border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!localSearch ? 'opacity-50' : ''}`} onClick={() => { if (localSearch) setLocalDeepResearch(!localDeepResearch); }}>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-200 flex items-center gap-2">Deep Research <span className="text-[9px] font-bold uppercase tracking-widest bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Pro</span></span>
-                    <span className="text-xs text-gray-500 mt-0.5">Agentic multi-query scraping</span>
-                  </div>
-                  <div className={`w-10 h-5 rounded-full flex items-center p-0.5 transition-colors ${localDeepResearch ? 'bg-purple-500' : 'bg-gray-700'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${localDeepResearch ? 'translate-x-5' : 'translate-x-0'}`} />
                   </div>
                 </div>
               </div>
@@ -310,6 +288,41 @@ export function Sidebar({
         </div>
       )}
 
+      {/* Collection Picker Modal */}
+      {isCollectionPickerOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-sm shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <div className="flex items-center gap-2 text-white font-bold">
+                <Book size={18} className="text-[#76B900]" />
+                <h3>Select Knowledge Base</h3>
+              </div>
+              <button onClick={() => setIsCollectionPickerOpen(false)} className="text-gray-500 hover:text-white transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-4 flex flex-col gap-2 max-h-[60vh] overflow-y-auto custom-scrollbar">
+              {collections.length === 0 ? (
+                <div className="text-center text-sm text-gray-500 py-4">No Knowledge Bases found. Create one in the Library.</div>
+              ) : (
+                collections.map(c => (
+                  <button 
+                    key={c.id} 
+                    onClick={() => {
+                      onNewKnowledgeChat(c.id);
+                      setIsCollectionPickerOpen(false);
+                      if (isMobileOpen) onMobileClose();
+                    }}
+                    className="flex flex-col text-left p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-[#76B900]/50 transition-colors"
+                  >
+                    <span className="text-sm font-semibold text-white">{c.name}</span>
+                    {c.description && <span className="text-xs text-gray-400 mt-1">{c.description}</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Overlay */}
       {isMobileOpen && (
         <div 
@@ -319,13 +332,16 @@ export function Sidebar({
       )}
 
       {/* When desktop is NOT open, we return early so it hides on MD screens */}
-      <aside className={`
-        fixed md:relative top-0 left-0 h-full w-[300px] min-w-[300px] z-50
-        bg-[#18181b] flex flex-col transition-transform duration-300 ease-out
+      <aside 
+        className={`
+          fixed md:relative top-0 left-0 h-screen w-[300px] min-w-[300px] z-50
+          bg-[#18181b] flex flex-col transition-transform duration-300 ease-out
         print:hidden
         ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
         ${isDesktopOpen ? "md:translate-x-0" : "md:hidden"}
-      `}>
+      `}
+      style={{ height: '100dvh' }}
+      >
         <div className="flex items-center justify-between p-5 border-b border-white/5">
           <div className="flex items-center gap-2.5">
             <div className="flex items-center justify-center w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 shadow-[0_0_15px_rgba(168,85,247,0.4)]">
@@ -342,13 +358,31 @@ export function Sidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-6">
-          <button 
-            onClick={onNewChat}
-            className="w-full flex items-center justify-center gap-2 bg-[#2f2f2f] hover:bg-[#3f3f3f] text-white py-2.5 rounded-xl text-sm transition-colors"
-          >
-            <Plus size={16} />
-            <span>New Chat</span>
-          </button>
+          <div className="flex flex-col gap-2">
+            <button 
+              onClick={() => { onNewNormalChat(); if (isMobileOpen) onMobileClose(); }}
+              className="w-full flex items-center justify-center gap-2 bg-[#2f2f2f] hover:bg-[#3f3f3f] text-white py-2.5 rounded-xl text-sm transition-colors shadow-sm"
+            >
+              <Plus size={16} />
+              <span>New Normal Chat</span>
+            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setIsCollectionPickerOpen(true)}
+                className="flex-1 flex items-center justify-center gap-2 bg-[#76B900]/10 hover:bg-[#76B900]/20 text-[#76B900] border border-[#76B900]/30 hover:border-[#76B900]/50 py-2 rounded-xl text-sm transition-colors shadow-sm"
+              >
+                <Book size={16} />
+                <span>New Knowledge Chat</span>
+              </button>
+              <button 
+                onClick={() => setIsLibraryOpen(true)}
+                className="px-3 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors shadow-sm"
+                title="Manage Library"
+              >
+                <Library size={16} />
+              </button>
+            </div>
+          </div>
 
           {/* History */}
           <div className="flex-1 flex flex-col gap-3 min-h-0">
@@ -477,6 +511,8 @@ export function Sidebar({
           </div>
         </div>
       </aside>
+
+      <LibraryModal isOpen={isLibraryOpen} onClose={() => setIsLibraryOpen(false)} />
     </>
   );
 }

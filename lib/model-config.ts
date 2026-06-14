@@ -49,18 +49,25 @@ export const CURATED_MODELS: ModelConfig[] = [
     description: "Zhipu AI's general-purpose language model",
   },
   {
-    keyword: "minimax-m2.7",
-    displayName: "MiniMax M2.7",
-    maxTokens: 4096,
-    category: "chat",
-    description: "MiniMax's flagship chat model",
-  },
-  {
     keyword: "qwen3.5-397b",
     displayName: "Qwen 3.5 397B",
     maxTokens: 2048,
     category: "chat",
     description: "Alibaba's largest reasoning model — conservative token limit",
+  },
+  {
+    keyword: "llama-3.3-70b",
+    displayName: "LLaMA 3.3 70B Instruct",
+    maxTokens: 4096,
+    category: "chat",
+    description: "Meta's newest state-of-the-art model — incredible at complex coding logic",
+  },
+  {
+    keyword: "mistral-large-3",
+    displayName: "Mistral Large 3 (675B)",
+    maxTokens: 4096,
+    category: "chat",
+    description: "European flagship model — renowned for natural writing tone & translation",
   },
 
   // ── Vision Models ───────────────────────────────────────────
@@ -70,13 +77,6 @@ export const CURATED_MODELS: ModelConfig[] = [
     maxTokens: 4096,
     category: "vision",
     description: "Meta's large multimodal model — text + image understanding",
-  },
-  {
-    keyword: "llama-3.2-11b",
-    displayName: "LLaMA 3.2 11B Vision",
-    maxTokens: 4096,
-    category: "vision",
-    description: "Meta's compact vision model — fast image analysis",
   },
 ];
 
