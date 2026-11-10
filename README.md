@@ -65,5 +65,5 @@ A personal chat web app for NVIDIA NIM models: sign in, pick a model, and chat w
 
 ## Notes
 
-- Private, single-owner project; not a template.
+- Personal, single-owner project; not a template.
 - Model availability depends on your NVIDIA NIM account; rerun `node fetch-models.js` to refresh the local list and curate what appears in the sidebar in `lib/model-config.ts`.
